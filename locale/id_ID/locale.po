@@ -1,0 +1,18 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: \n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-10-22T00:00:00+00:00\n"
+"PO-Revision-Date: 2026-10-22T00:00:00+00:00\n"
+"Last-Translator: \n"
+"Language-Team: \n"
+"Language: \n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+msgid "plugins.generic.docxFontStripper.displayName"
+msgstr "Docx Font Stripper"
+
+msgid "plugins.generic.docxFontStripper.description"
+msgstr "Membuang font tertanam dari file Word (.docx) yang diunggah (submission, review, revisi, copyediting, produksi) agar ukurannya kecil. Teks, gambar, tabel, komentar, dan track changes tidak diubah; bila file hasil tidak lolos verifikasi, file asli dipertahankan. Hasil dicatat ke error log PHP."

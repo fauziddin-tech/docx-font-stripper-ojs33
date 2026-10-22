@@ -1,0 +1,17 @@
+{
+	"name": "fauziddin-tech/docx-font-stripper-ojs33",
+	"description": "OJS 3.3 generic plugin that removes embedded fonts from uploaded .docx files",
+	"type": "project",
+	"license": "GPL-3.0-or-later",
+	"require": {
+		"php": ">=7.4",
+		"ext-zip": "*",
+		"ext-dom": "*"
+	},
+	"require-dev": {
+		"phpunit/phpunit": "^9.6"
+	},
+	"config": {
+		"sort-packages": true
+	}
+}
