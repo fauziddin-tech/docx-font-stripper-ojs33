@@ -131,7 +131,14 @@ vendor/bin/phpunit
 DOCX_SAMPLE=/path/ke/artikel.docx vendor/bin/phpunit --filter testRealSample
 ```
 
-GitHub Actions (`.github/workflows/ci.yml`) menjalankan tes di PHP 7.4, 8.1, dan 8.2,
-membangun paket, dan saat sebuah Release dipublikasikan, melampirkan
-`docxFontStripper-<versi>.tar.gz` ke Release tersebut. Naikkan `<release>` di
-`version.xml` sebelum membuat Release.
+GitHub Actions (`.github/workflows/ci.yml`) menjalankan tes di PHP 7.4, 8.1, dan 8.2 dan
+membangun paket.
+
+Membuat rilis:
+
+1. Naikkan `<release>` di `version.xml` (mis. `1.2.0.0`) dan tulis `release-notes/1.2.0.0.md`.
+2. Setelah masuk ke `main`, buat tag `v` + versi tersebut dan push:
+   `git tag v1.2.0.0 && git push origin v1.2.0.0`.
+3. Bila tes lolos, workflow membuat Release untuk tag itu dengan
+   `docxFontStripper-1.2.0.0.tar.gz` terlampir (tag yang tidak cocok dengan `version.xml`
+   ditolak). Release yang dibuat manual lewat GitHub juga mendapat lampiran yang sama.
