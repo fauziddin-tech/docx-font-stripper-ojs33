@@ -6,7 +6,8 @@
  * Distributed under the GNU GPL v3.
  *
  * @class DocxFontStripperPlugin
- * @brief Removes embedded fonts from uploaded .docx submission files.
+ * @brief Removes embedded fonts from uploaded .docx submission files and
+ *  downscales PNG images stored far above their displayed size.
  *
  * Hooks (pkp-lib 3_3_0-22):
  *  - SubmissionFile::add  classes/services/PKPSubmissionFileService.inc.php:448
@@ -103,7 +104,7 @@ class DocxFontStripperPlugin extends GenericPlugin {
 			// touch files that were really uploaded in this request.
 			if (!$this->_isUploadedInThisRequest($size)) return;
 
-			$stripper = new DocxFontStripper();
+			$stripper = new DocxFontStripper(['downscaleImages' => true, 'imageTargetDpi' => 500]);
 			$adapter = $fs->getAdapter();
 			if ($adapter instanceof \League\Flysystem\Adapter\Local) {
 				$result = $stripper->stripInPlace($adapter->applyPathPrefix($file->path));

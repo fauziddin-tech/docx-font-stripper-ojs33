@@ -279,6 +279,97 @@ class DocxFontStripperTest extends TestCase {
 		$this->assertSame([$in], glob($this->dir . '/*'));
 	}
 
+	public function testDownscalesOversizedPng(): void {
+		$parts = $this->imageFixture(1200, 600, DocxFixture::picture('rId4', 914400, 457200));
+		$in = $this->fixture('image.docx', $parts);
+		$out = $this->dir . '/out.docx';
+
+		$result = (new DocxFontStripper(['downscaleImages' => true]))->strip($in, $out);
+
+		$this->assertSame(DocxFontStripResult::STRIPPED, $result->status, $result->summary());
+		$this->assertCount(1, $result->resizedImages);
+		$this->assertSame([], $result->removedParts);
+		$cleaned = DocxFixture::read($out);
+		// 1 x 0.5 inch at 500 dpi
+		$this->assertSame([500, 250], array_slice(getimagesizefromstring($cleaned['word/media/image1.png']), 0, 2));
+		$this->assertSame(2, DocxFixture::pngColorType($cleaned['word/media/image1.png']), 'opaque image saved without alpha');
+		$this->assertLessThan(strlen($parts['word/media/image1.png']) / 2, strlen($cleaned['word/media/image1.png']));
+		foreach (['word/document.xml', '[Content_Types].xml', 'word/_rels/document.xml.rels', 'word/fontTable.xml', 'word/settings.xml'] as $name) {
+			$this->assertSame($parts[$name], $cleaned[$name], $name . ' must be unchanged');
+		}
+	}
+
+	public function testImagesUntouchedByDefault(): void {
+		$in = $this->fixture('image.docx', $this->imageFixture(1200, 600, DocxFixture::picture('rId4', 914400, 457200)));
+
+		$this->assertSame(DocxFontStripResult::UNCHANGED, $this->stripper->stripInPlace($in)->status);
+	}
+
+	public function testCroppedPictureKeepsResolutionOfVisiblePart(): void {
+		// Only the middle half is shown, at 1 x 0.5 inch: the full image needs 1000 px width
+		$picture = DocxFixture::picture('rId4', 914400, 457200, 'l="25000" r="25000"');
+		$in = $this->fixture('crop.docx', $this->imageFixture(1600, 800, $picture));
+		$out = $this->dir . '/out.docx';
+
+		$result = (new DocxFontStripper(['downscaleImages' => true]))->strip($in, $out);
+
+		$this->assertTrue($result->isStripped(), $result->summary());
+		$cleaned = DocxFixture::read($out);
+		$this->assertSame([1000, 500], array_slice(getimagesizefromstring($cleaned['word/media/image1.png']), 0, 2));
+	}
+
+	public function testImageAtTargetResolutionIsUntouched(): void {
+		// 1200 px over 2.4 inch = 500 dpi already
+		$in = $this->fixture('ok.docx', $this->imageFixture(1200, 600, DocxFixture::picture('rId4', 2194560, 1097280)));
+
+		$result = (new DocxFontStripper(['downscaleImages' => true]))->stripInPlace($in);
+
+		$this->assertSame(DocxFontStripResult::UNCHANGED, $result->status);
+	}
+
+	public function testLargestDisplayedSizeWins(): void {
+		$pictures = DocxFixture::picture('rId4', 914400, 457200) . DocxFixture::picture('rId4', 1828800, 914400);
+		$in = $this->fixture('twice.docx', $this->imageFixture(2400, 1200, $pictures));
+		$out = $this->dir . '/out.docx';
+
+		$this->assertTrue((new DocxFontStripper(['downscaleImages' => true]))->strip($in, $out)->isStripped());
+		$cleaned = DocxFixture::read($out);
+		$this->assertSame([1000, 500], array_slice(getimagesizefromstring($cleaned['word/media/image1.png']), 0, 2));
+	}
+
+	public function testImageUsedOutsidePlainPictureIsUntouched(): void {
+		// Same image also used by a VML shape, whose size we do not measure
+		$vml = '<w:p><w:r><w:pict><v:shape xmlns:v="urn:schemas-microsoft-com:vml" style="width:10pt;height:5pt">'
+			. '<v:imagedata r:id="rId4"/></v:shape></w:pict></w:r></w:p>';
+		$in = $this->fixture('vml.docx', $this->imageFixture(1200, 600, DocxFixture::picture('rId4', 914400, 457200) . $vml));
+
+		$result = (new DocxFontStripper(['downscaleImages' => true]))->stripInPlace($in);
+
+		$this->assertSame(DocxFontStripResult::UNCHANGED, $result->status);
+	}
+
+	public function testTransparentPngKeepsAlpha(): void {
+		$parts = $this->imageFixture(1200, 600, DocxFixture::picture('rId4', 914400, 457200), true);
+		$in = $this->fixture('alpha.docx', $parts);
+		$out = $this->dir . '/out.docx';
+
+		$this->assertTrue((new DocxFontStripper(['downscaleImages' => true]))->strip($in, $out)->isStripped());
+		$this->assertSame(6, DocxFixture::pngColorType(DocxFixture::read($out)['word/media/image1.png']));
+	}
+
+	public function testFontsAndImagesTogether(): void {
+		$parts = DocxFixture::withBodyContent(DocxFixture::parts(true), DocxFixture::picture('rId4', 914400, 457200));
+		$parts['word/media/image1.png'] = DocxFixture::png(1200, 600);
+		$in = $this->fixture('both.docx', $parts);
+
+		$result = (new DocxFontStripper(['downscaleImages' => true]))->stripInPlace($in);
+
+		$this->assertTrue($result->isStripped(), $result->summary());
+		$this->assertCount(3, $result->removedParts);
+		$this->assertCount(1, $result->resizedImages);
+		$this->assertStringContainsString('1 image(s) downscaled', $result->summary());
+	}
+
 	/**
 	 * Optional: run against a real file, e.g.
 	 *   DOCX_SAMPLE=/path/to/article.docx vendor/bin/phpunit
@@ -289,7 +380,7 @@ class DocxFontStripperTest extends TestCase {
 		$this->assertFileExists($sample);
 		$out = $this->dir . '/sample.docx';
 
-		$result = $this->stripper->strip($sample, $out);
+		$result = (new DocxFontStripper(['downscaleImages' => true]))->strip($sample, $out);
 		fwrite(STDERR, "\n" . basename($sample) . ': ' . $result->summary() . "\n");
 
 		$this->assertContains($result->status, [DocxFontStripResult::STRIPPED, DocxFontStripResult::UNCHANGED], $result->reason);
@@ -302,6 +393,22 @@ class DocxFontStripperTest extends TestCase {
 				$this->assertStringStartsNotWith('word/fonts/', $name);
 			}
 		}
+	}
+
+	/**
+	 * Document without fonts, with a noisy PNG as word/media/image1.png (rId4).
+	 *
+	 * @param int $width
+	 * @param int $height
+	 * @param string $paragraphs Body content referencing the image
+	 * @param bool $alpha
+	 * @return array
+	 */
+	private function imageFixture($width, $height, $paragraphs, $alpha = false) {
+		if (!function_exists('imagecreatetruecolor')) $this->markTestSkipped('ext-gd required');
+		$parts = DocxFixture::withBodyContent(DocxFixture::parts(false), $paragraphs);
+		$parts['word/media/image1.png'] = DocxFixture::png($width, $height, $alpha);
+		return $parts;
 	}
 
 	/**

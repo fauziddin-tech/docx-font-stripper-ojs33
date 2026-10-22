@@ -15,4 +15,4 @@ msgid "plugins.generic.docxFontStripper.displayName"
 msgstr "Docx Font Stripper"
 
 msgid "plugins.generic.docxFontStripper.description"
-msgstr "Membuang font tertanam dari file Word (.docx) yang diunggah (submission, review, revisi, copyediting, produksi) agar ukurannya kecil. Teks, gambar, tabel, komentar, dan track changes tidak diubah; bila file hasil tidak lolos verifikasi, file asli dipertahankan. Hasil dicatat ke error log PHP."
+msgstr "Membuang font tertanam dari file Word (.docx) yang diunggah (submission, review, revisi, copyediting, produksi) dan memperkecil gambar PNG yang resolusinya jauh di atas ukuran tampilnya (menjadi 500 dpi), agar ukuran file kecil. Teks, tabel, komentar, dan track changes tidak diubah; bila file hasil tidak lolos verifikasi, file asli dipertahankan. Hasil dicatat ke error log PHP."

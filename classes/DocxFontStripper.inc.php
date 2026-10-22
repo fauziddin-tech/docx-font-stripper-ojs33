@@ -6,23 +6,26 @@
  * Distributed under the GNU GPL v3.
  *
  * @class DocxFontStripper
- * @brief Removes embedded fonts from a .docx (WordprocessingML) package.
+ * @brief Removes embedded fonts from a .docx (WordprocessingML) package and,
+ * optionally, downscales PNG images stored far above their displayed size.
  *
- * Pure PHP (ext-zip + ext-dom), no OJS dependency, so it can be unit tested
- * on its own. Only package plumbing is touched:
+ * Pure PHP (ext-zip + ext-dom, ext-gd for images), no OJS dependency, so it
+ * can be unit tested on its own. Only package plumbing is touched:
  *  - font parts (word/fonts/* and every target of a "font" relationship),
  *  - the font relationships themselves (e.g. word/_rels/fontTable.xml.rels),
  *  - w:embedRegular/Bold/Italic/BoldItalic in the font table(s),
  *  - Override/Default entries for the removed parts in [Content_Types].xml,
  *  - w:embedTrueTypeFonts and w:saveSubsetFonts in word/settings.xml.
- * Every other part keeps its exact content; parts that were stored without
+ * With 'downscaleImages', a PNG shown only in plain pictures (wp:inline or
+ * wp:anchor) is resampled to 'imageTargetDpi' at its largest displayed size,
+ * keeping its part name and format. Every other part keeps its exact content; parts that were stored without
  * compression are deflated while the package is rewritten anyway. The output
  * is verified before it is accepted, otherwise the original stays as it is.
  */
 
 class DocxFontStripResult {
-	const STRIPPED = 'stripped';   // fonts removed, output written and verified
-	const UNCHANGED = 'unchanged'; // valid .docx without embedded fonts
+	const STRIPPED = 'stripped';   // fonts removed and/or images downscaled, output verified
+	const UNCHANGED = 'unchanged'; // valid .docx, nothing to clean
 	const SKIPPED = 'skipped';     // not a .docx (or cannot be handled here)
 	const FAILED = 'failed';       // something went wrong; original kept
 
@@ -46,6 +49,9 @@ class DocxFontStripResult {
 
 	/** @var string[] Stored (uncompressed) parts that were deflated, content unchanged */
 	public $recompressedParts = [];
+
+	/** @var string[] PNG parts downscaled, as "name WxH (bytes) -> wxh (bytes)" */
+	public $resizedImages = [];
 
 	/**
 	 * @param string $status
@@ -71,9 +77,10 @@ class DocxFontStripResult {
 		if ($this->status === self::STRIPPED) {
 			$saved = $this->sizeBefore > 0 ? (1 - $this->sizeAfter / $this->sizeBefore) * 100 : 0;
 			return sprintf(
-				'stripped: %s -> %s bytes (-%.1f%%), %d part(s) removed, %d XML part(s) updated, %d part(s) recompressed',
+				'cleaned: %s -> %s bytes (-%.1f%%), %d part(s) removed, %d XML part(s) updated, %d part(s) recompressed, %d image(s) downscaled%s',
 				number_format($this->sizeBefore), number_format($this->sizeAfter), $saved,
-				count($this->removedParts), count($this->modifiedParts), count($this->recompressedParts)
+				count($this->removedParts), count($this->modifiedParts), count($this->recompressedParts),
+				count($this->resizedImages), $this->resizedImages ? ' [' . implode('; ', $this->resizedImages) . ']' : ''
 			);
 		}
 		return sprintf('%s: %s (%s bytes)', $this->status, $this->reason, number_format($this->sizeBefore));
@@ -93,6 +100,48 @@ class DocxFontStripper {
 
 	/** Upper bound for an XML part we load into DOM (zip bomb guard). */
 	const MAX_XML_PART_BYTES = 16777216;
+
+	/** PNGs smaller than this are not worth resampling. */
+	const MIN_IMAGE_BYTES = 65536;
+
+	/** Upper bound for a PNG we decode. */
+	const MAX_IMAGE_BYTES = 52428800;
+
+	/** Only downscale when the new size is at most this fraction of the old (per axis). */
+	const MAX_IMAGE_SCALE = 0.7;
+
+	/** EMU per inch (DrawingML units). */
+	const EMU_PER_INCH = 914400;
+
+	/** @var string[] Relationship id attribute namespaces (transitional, strict) */
+	private static $relationshipIdNamespaces = [
+		'http://schemas.openxmlformats.org/officeDocument/2006/relationships',
+		'http://purl.oclc.org/ooxml/officeDocument/relationships',
+	];
+
+	/** @var string[] Image relationship types (transitional, strict) */
+	private static $imageRelationshipTypes = [
+		'http://schemas.openxmlformats.org/officeDocument/2006/relationships/image',
+		'http://purl.oclc.org/ooxml/officeDocument/relationships/image',
+	];
+
+	/** @var string[] */
+	private static $drawingNamespaces = [
+		'http://schemas.openxmlformats.org/drawingml/2006/main',
+		'http://purl.oclc.org/ooxml/drawingml/main',
+	];
+
+	/** @var string[] */
+	private static $pictureNamespaces = [
+		'http://schemas.openxmlformats.org/drawingml/2006/picture',
+		'http://purl.oclc.org/ooxml/drawingml/picture',
+	];
+
+	/** @var string[] */
+	private static $wordDrawingNamespaces = [
+		'http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing',
+		'http://purl.oclc.org/ooxml/drawingml/wordprocessingDrawing',
+	];
 
 	/** @var string[] WordprocessingML namespaces (transitional, strict) */
 	private static $wordNamespaces = [
@@ -117,6 +166,19 @@ class DocxFontStripper {
 		'jpg', 'jpeg', 'png', 'gif', 'webp', 'jdp', 'wdp', 'mp3', 'mp4', 'm4a', 'mov', 'avi', 'wmv',
 		'zip', 'gz', 'docx', 'xlsx', 'pptx', 'docm', 'xlsm', 'pptm',
 	];
+
+	/** @var array */
+	private $_options;
+
+	/**
+	 * @param array $options
+	 *  - downscaleImages (bool, default false): resample oversized PNG images
+	 *  - imageTargetDpi (int, default 500): resolution kept at the displayed size;
+	 *    500 dpi is the usual publisher requirement for figures mixing text and graphics
+	 */
+	public function __construct(array $options = []) {
+		$this->_options = array_merge(['downscaleImages' => false, 'imageTargetDpi' => 500], $options);
+	}
 
 	/**
 	 * Strip embedded fonts from $sourcePath and write the result to $destinationPath.
@@ -171,6 +233,13 @@ class DocxFontStripper {
 		$result->removedParts = array_values($plan['remove']);
 		$result->modifiedParts = array_keys($plan['xml']);
 		$result->recompressedParts = $plan['recompressed'];
+		foreach ($plan['images'] as $name => $image) {
+			$result->resizedImages[] = sprintf(
+				'%s %dx%d (%s) -> %dx%d (%s)', $name,
+				$image['from'][0], $image['from'][1], number_format($image['from'][2]),
+				$image['to'][0], $image['to'][1], number_format($image['to'][2])
+			);
+		}
 		return $result;
 	}
 
@@ -296,25 +365,41 @@ class DocxFontStripper {
 				if ($embeds) $xml[$name] = $doc;
 			}
 
-			if (!$remove && !$xml) {
-				return new DocxFontStripResult(DocxFontStripResult::UNCHANGED, 'no embedded fonts');
+			$hasFonts = $remove || $xml;
+			if ($hasFonts) {
+				// 4. Do not embed again on the next save
+				$settingsLower = strtolower(self::SETTINGS_PART);
+				if (isset($entries[$settingsLower])) {
+					$doc = $this->_loadXmlPart($zip, $entries[$settingsLower]);
+					$flags = $this->_elements($doc, self::$wordNamespaces, self::$settingsElements);
+					foreach ($flags as $node) $node->parentNode->removeChild($node);
+					if ($flags) $xml[$entries[$settingsLower]] = $doc;
+				}
+
+				// 5. [Content_Types].xml: overrides for removed parts, defaults no longer used
+				if ($this->_cleanContentTypes($contentTypes, $entries, $remove)) {
+					$xml[$entries[strtolower(self::CONTENT_TYPES_PART)]] = $contentTypes;
+				}
 			}
 
-			// 4. Do not embed again on the next save
-			$settingsLower = strtolower(self::SETTINGS_PART);
-			if (isset($entries[$settingsLower])) {
-				$doc = $this->_loadXmlPart($zip, $entries[$settingsLower]);
-				$flags = $this->_elements($doc, self::$wordNamespaces, self::$settingsElements);
-				foreach ($flags as $node) $node->parentNode->removeChild($node);
-				if ($flags) $xml[$entries[$settingsLower]] = $doc;
+			// 6. Optional: oversized PNG images. A problem here only means no image is touched.
+			$images = [];
+			if ($this->_options['downscaleImages']) {
+				try {
+					$images = $this->_planImages($zip, $entries, $remove);
+				} catch (Throwable $e) {
+					$images = [];
+				}
 			}
 
-			// 5. [Content_Types].xml: overrides for removed parts, defaults no longer used
-			if ($this->_cleanContentTypes($contentTypes, $entries, $remove)) {
-				$xml[$entries[strtolower(self::CONTENT_TYPES_PART)]] = $contentTypes;
+			if (!$hasFonts && !$images) {
+				return new DocxFontStripResult(
+					DocxFontStripResult::UNCHANGED,
+					$this->_options['downscaleImages'] ? 'no embedded fonts or oversized images' : 'no embedded fonts'
+				);
 			}
 
-			return ['entries' => $entries, 'remove' => $remove, 'xml' => $xml];
+			return ['entries' => $entries, 'remove' => $remove, 'xml' => $xml, 'images' => $images];
 		} finally {
 			$zip->close();
 		}
@@ -383,7 +468,7 @@ class DocxFontStripper {
 		for ($i = 0; $i < $zip->numFiles; $i++) {
 			$stat = $zip->statIndex($i);
 			if (!$stat || $stat['comp_method'] !== ZipArchive::CM_STORE || $stat['size'] === 0) continue;
-			if (isset($plan['xml'][$stat['name']])) continue;
+			if (isset($plan['xml'][$stat['name']]) || isset($plan['images'][$stat['name']])) continue;
 			if (in_array(strtolower(pathinfo($stat['name'], PATHINFO_EXTENSION)), self::$precompressedExtensions, true)) continue;
 			if ($zip->setCompressionIndex($i, ZipArchive::CM_DEFLATE)) $plan['recompressed'][] = $stat['name'];
 		}
@@ -394,6 +479,13 @@ class DocxFontStripper {
 				throw new RuntimeException('cannot update ' . $name);
 			}
 			$zip->setCompressionName($name, ZipArchive::CM_DEFLATE);
+		}
+		foreach ($plan['images'] as $name => $image) {
+			if (!$zip->addFromString($name, $image['data'])) {
+				$zip->close();
+				throw new RuntimeException('cannot update ' . $name);
+			}
+			$zip->setCompressionName($name, ZipArchive::CM_STORE);
 		}
 		if (!$zip->close()) {
 			throw new RuntimeException('cannot save ZIP: ' . $zip->getStatusString());
@@ -429,7 +521,7 @@ class DocxFontStripper {
 				throw new RuntimeException('validation: unexpected number of entries');
 			}
 
-			$modified = array_change_key_case(array_flip(array_keys($plan['xml'])), CASE_LOWER);
+			$modified = array_change_key_case(array_flip(array_merge(array_keys($plan['xml']), array_keys($plan['images']))), CASE_LOWER);
 			foreach ($plan['entries'] as $lower => $name) {
 				$isRemoved = isset($plan['remove'][$lower]);
 				if ($isRemoved === isset($outEntries[$lower])) {
@@ -450,6 +542,15 @@ class DocxFontStripper {
 				if (substr($stat['name'], -1) === '/') continue;
 				if ($this->_crc32OfEntry($out, $stat['name']) !== ($stat['crc'] & 0xFFFFFFFF)) {
 					throw new RuntimeException('validation: CRC mismatch in ' . $stat['name']);
+				}
+			}
+
+			// Resampled images must be PNGs of the planned size
+			foreach ($plan['images'] as $name => $image) {
+				$data = $out->getFromName($name);
+				$info = $data === false ? false : @getimagesizefromstring($data);
+				if (!$info || $info[2] !== IMAGETYPE_PNG || $info[0] !== $image['to'][0] || $info[1] !== $image['to'][1]) {
+					throw new RuntimeException('validation: resized image ' . $name . ' is not valid');
 				}
 			}
 
@@ -482,6 +583,226 @@ class DocxFontStripper {
 			$out->close();
 			$source->close();
 		}
+	}
+
+	/**
+	 * Find PNG parts that are only used as plain pictures and are stored at a
+	 * much higher resolution than needed for their displayed size.
+	 *
+	 * @param ZipArchive $zip
+	 * @param array $entries lower => actual
+	 * @param array $remove lower => actual
+	 * @return array actual name => ['data' => string, 'from' => [w, h, bytes], 'to' => [w, h, bytes]]
+	 */
+	private function _planImages($zip, $entries, $remove) {
+		if (!function_exists('imagecreatefromstring') || !function_exists('imagepng')) return [];
+
+		$pngs = [];
+		foreach ($entries as $lower => $name) {
+			if (substr($lower, -4) === '.png' && !isset($remove[$lower])) $pngs[$lower] = $name;
+		}
+		if (!$pngs) return [];
+
+		// Who refers to each PNG? Anything but an image relationship from an XML part blocks it.
+		$usages = [];
+		$blocked = [];
+		foreach ($entries as $lower => $relsName) {
+			if (substr($lower, -5) !== '.rels' || isset($remove[$lower])) continue;
+			$raw = $this->_readPart($zip, $relsName);
+			if (stripos($raw, '.png') === false) continue;
+			$doc = $this->_parseXml($raw, $relsName);
+			$host = $this->_sourcePartOfRels($relsName);
+			foreach ($this->_elements($doc, [self::NS_RELATIONSHIPS], ['Relationship']) as $rel) {
+				if (strcasecmp($rel->getAttribute('TargetMode'), 'External') === 0) continue;
+				$target = strtolower($this->_resolveTarget($relsName, $rel->getAttribute('Target')));
+				if (!isset($pngs[$target])) continue;
+				$hostLower = $host === null ? '' : strtolower($host);
+				if (!in_array($rel->getAttribute('Type'), self::$imageRelationshipTypes, true)
+					|| substr($hostLower, -4) !== '.xml' || !isset($entries[$hostLower])) {
+					$blocked[$target] = true;
+					continue;
+				}
+				$usages[$target][] = [$entries[$hostLower], $rel->getAttribute('Id')];
+			}
+		}
+
+		$planned = [];
+		$hostDocs = [];
+		foreach ($usages as $pngLower => $uses) {
+			if (isset($blocked[$pngLower])) continue;
+			$needed = $this->_requiredPixels($zip, $uses, $hostDocs);
+			if ($needed === null) continue;
+			$image = $this->_downscalePng($zip, $pngs[$pngLower], $needed);
+			if ($image !== null) $planned[$pngs[$pngLower]] = $image;
+		}
+		return $planned;
+	}
+
+	/**
+	 * Pixels needed for the largest displayed size of an image, or null when
+	 * any use of it is not a plain picture whose size we can read.
+	 *
+	 * @param ZipArchive $zip
+	 * @param array $uses [[host part name, relationship id], ...]
+	 * @param array $hostDocs Cache of parsed host parts
+	 * @return float[]|null [width, height]
+	 */
+	private function _requiredPixels($zip, $uses, &$hostDocs) {
+		$dpi = (float) $this->_options['imageTargetDpi'];
+		$needed = [0.0, 0.0];
+		foreach ($uses as $use) {
+			list($host, $rId) = $use;
+			if ($rId === '' || strpbrk($rId, '"\'') !== false) return null;
+			if (!isset($hostDocs[$host])) $hostDocs[$host] = new DOMXPath($this->_loadXmlPart($zip, $host));
+			$xpath = $hostDocs[$host];
+
+			$found = 0;
+			foreach (self::$relationshipIdNamespaces as $ns) {
+				foreach ($xpath->query('//@*[namespace-uri()="' . $ns . '" and .="' . $rId . '"]') as $attr) {
+					$size = $this->_pictureSize($attr);
+					if ($size === null) return null;
+					$needed[0] = max($needed[0], $size[0] * $dpi);
+					$needed[1] = max($needed[1], $size[1] * $dpi);
+					$found++;
+				}
+			}
+			if (!$found) return null;
+		}
+		return $needed;
+	}
+
+	/**
+	 * For an r:embed on a:blip inside wp:inline|wp:anchor/a:graphic/a:graphicData/pic:pic/pic:blipFill,
+	 * return the displayed size in inches of the whole (uncropped) image.
+	 *
+	 * @param DOMAttr $attr
+	 * @return float[]|null [width, height]
+	 */
+	private function _pictureSize($attr) {
+		$blip = $attr->ownerElement;
+		if ($attr->localName !== 'embed' || !$this->_is($blip, self::$drawingNamespaces, 'blip')) return null;
+		$blipFill = $blip->parentNode;
+		$pic = $blipFill ? $blipFill->parentNode : null;
+		$graphicData = $pic ? $pic->parentNode : null;
+		$graphic = $graphicData ? $graphicData->parentNode : null;
+		$frame = $graphic ? $graphic->parentNode : null;
+		if (!$this->_is($blipFill, self::$pictureNamespaces, 'blipFill')
+			|| !$this->_is($pic, self::$pictureNamespaces, 'pic')
+			|| !$this->_is($graphicData, self::$drawingNamespaces, 'graphicData')
+			|| !$this->_is($graphic, self::$drawingNamespaces, 'graphic')
+			|| !($this->_is($frame, self::$wordDrawingNamespaces, 'inline') || $this->_is($frame, self::$wordDrawingNamespaces, 'anchor'))) {
+			return null;
+		}
+
+		$extent = null;
+		$srcRect = null;
+		foreach ($frame->childNodes as $child) {
+			if ($this->_is($child, self::$wordDrawingNamespaces, 'extent')) $extent = $child;
+		}
+		foreach ($blipFill->childNodes as $child) {
+			if ($this->_is($child, self::$drawingNamespaces, 'srcRect')) $srcRect = $child;
+		}
+		if (!$extent) return null;
+		$cx = (int) $extent->getAttribute('cx');
+		$cy = (int) $extent->getAttribute('cy');
+		if ($cx <= 0 || $cy <= 0) return null;
+
+		// A cropped picture shows only part of the image at the extent size
+		$visibleX = 1.0;
+		$visibleY = 1.0;
+		if ($srcRect) {
+			$visibleX = 1 - ((int) $srcRect->getAttribute('l') + (int) $srcRect->getAttribute('r')) / 100000;
+			$visibleY = 1 - ((int) $srcRect->getAttribute('t') + (int) $srcRect->getAttribute('b')) / 100000;
+		}
+		if ($visibleX < 0.05 || $visibleY < 0.05) return null;
+
+		return [$cx / self::EMU_PER_INCH / $visibleX, $cy / self::EMU_PER_INCH / $visibleY];
+	}
+
+	/**
+	 * @param DOMNode|null $node
+	 * @param string[] $namespaces
+	 * @param string $localName
+	 * @return bool
+	 */
+	private function _is($node, $namespaces, $localName) {
+		return $node instanceof DOMElement && $node->localName === $localName && in_array($node->namespaceURI, $namespaces, true);
+	}
+
+	/**
+	 * Resample a PNG down to the needed pixel size (aspect ratio kept).
+	 *
+	 * @param ZipArchive $zip
+	 * @param string $name
+	 * @param float[] $needed [width, height] in pixels
+	 * @return array|null
+	 */
+	private function _downscalePng($zip, $name, $needed) {
+		$stat = $zip->statName($name);
+		if ($stat === false || $stat['size'] < self::MIN_IMAGE_BYTES || $stat['size'] > self::MAX_IMAGE_BYTES) return null;
+		$data = $zip->getFromName($name);
+		if ($data === false) return null;
+		$info = @getimagesizefromstring($data);
+		if (!$info || $info[2] !== IMAGETYPE_PNG || $info[0] < 1 || $info[1] < 1) return null;
+		list($width, $height) = $info;
+
+		$scale = max($needed[0] / $width, $needed[1] / $height);
+		if ($scale > self::MAX_IMAGE_SCALE) return null;
+		$newWidth = max(1, (int) ceil($width * $scale));
+		$newHeight = max(1, (int) ceil($height * $scale));
+		if (!$this->_hasMemoryFor(($width * $height + $newWidth * $newHeight) * 6 + strlen($data) * 2)) return null;
+
+		$source = @imagecreatefromstring($data);
+		if (!$source) return null;
+		$target = imagecreatetruecolor($newWidth, $newHeight);
+		imagealphablending($target, false);
+		imagesavealpha($target, true);
+		imagefill($target, 0, 0, imagecolorallocatealpha($target, 0, 0, 0, 127));
+		$ok = imagecopyresampled($target, $source, 0, 0, 0, 0, $newWidth, $newHeight, $width, $height);
+		unset($source);
+		if (!$ok) return null;
+		// Fully opaque: drop the alpha channel, RGB is smaller than RGBA
+		if ($this->_isOpaque($target, $newWidth, $newHeight)) imagesavealpha($target, false);
+
+		ob_start();
+		$ok = imagepng($target, null, 9, PNG_ALL_FILTERS);
+		$png = ob_get_clean();
+		unset($target);
+		if (!$ok || !is_string($png) || $png === '' || strlen($png) > 0.8 * strlen($data)) return null;
+
+		return ['data' => $png, 'from' => [$width, $height, strlen($data)], 'to' => [$newWidth, $newHeight, strlen($png)]];
+	}
+
+	/**
+	 * @param resource|GdImage $image
+	 * @param int $width
+	 * @param int $height
+	 * @return bool
+	 */
+	private function _isOpaque($image, $width, $height) {
+		if ($width * $height > 4000000) return false;
+		for ($y = 0; $y < $height; $y++) {
+			for ($x = 0; $x < $width; $x++) {
+				if ((imagecolorat($image, $x, $y) >> 24) & 0x7F) return false;
+			}
+		}
+		return true;
+	}
+
+	/**
+	 * @param int $bytes
+	 * @return bool
+	 */
+	private function _hasMemoryFor($bytes) {
+		$limit = trim((string) ini_get('memory_limit'));
+		if ($limit === '' || $limit === '-1') return true;
+		$value = (int) $limit;
+		switch (strtolower(substr($limit, -1))) {
+			case 'g': $value *= 1024;
+			case 'm': $value *= 1024;
+			case 'k': $value *= 1024;
+		}
+		return memory_get_usage() + $bytes < $value * 0.8;
 	}
 
 	/**

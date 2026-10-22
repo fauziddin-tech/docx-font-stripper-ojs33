@@ -1,9 +1,15 @@
 # Docx Font Stripper (OJS 3.3)
 
 Plugin generik OJS 3.3.0-x (diuji terhadap kode **3.3.0-22**; PHP 7.4–8.2) yang
-membuang **font tertanam** dari file Word `.docx` saat diunggah, supaya ukuran file kecil.
-Contoh nyata: artikel 15,0 MB dengan 14 font tertanam (dan semua entri ZIP tanpa
-kompresi) menjadi 0,49 MB; sisanya hampir seluruhnya gambar.
+membuang **font tertanam** dari file Word `.docx` saat diunggah, dan **memperkecil gambar
+PNG** yang resolusinya jauh di atas ukuran tampilnya, supaya ukuran file kecil.
+
+Contoh nyata:
+
+| File | Sebelum | Sesudah | Keterangan |
+|---|---|---|---|
+| Artikel A | 14,95 MB | 0,49 MB | 14 font tertanam, semua entri ZIP tanpa kompresi; sisanya gambar JPEG (tidak diubah) |
+| Artikel B | 10,69 MB | 0,15 MB | 22 file font (8,5 MB); logo PNG 1493×1053 px (2,1 MB) yang tampil 1,74×1,23 cm diperkecil ke 344×243 px (99 KB) |
 
 ## Yang diubah dalam .docx
 
@@ -15,6 +21,22 @@ kompresi) menjadi 0,49 MB; sisanya hampir seluruhnya gambar.
 | `[Content_Types].xml` | `Override` untuk bagian yang dihapus, dan `Default` ekstensi (mis. `odttf`) yang tak lagi dipakai, dihapus |
 | `word/settings.xml` | `w:embedTrueTypeFonts` dan `w:saveSubsetFonts` dihapus, supaya Word tidak menanam ulang saat disimpan |
 | Entri lain yang tersimpan **tanpa kompresi** (mis. `document.xml`) | dikompresi ulang (deflate); isinya tetap identik byte per byte |
+| Gambar PNG yang resolusinya jauh di atas ukuran tampil | diperkecil ke **500 dpi** pada ukuran tampil terbesarnya (lihat di bawah) |
+
+### Aturan memperkecil gambar
+
+- Target 500 dpi pada ukuran tampil: standar umum penerbit untuk gambar campuran teks +
+  grafis (foto biasanya 300 dpi). Tetap tajam saat dicetak dan saat di-zoom.
+- Hanya PNG. JPEG tidak di-encode ulang (akan menambah artefak), format lain tidak disentuh.
+- Ukuran tampil dibaca dari `wp:extent` gambar biasa (`wp:inline`/`wp:anchor` → `pic:pic`),
+  memperhitungkan crop (`a:srcRect`); bila gambar dipakai beberapa kali, ukuran terbesar yang
+  dipakai. Gambar yang juga dipakai di tempat lain (VML, isi bentuk, grup,
+  bullet bergambar, dll.) **tidak** diubah, karena ukurannya tidak bisa dipastikan.
+- Hanya bila dimensi baru ≤ 70% dimensi lama, file PNG ≥ 64 KB, dan hasilnya ≥ 20% lebih kecil.
+- Nama dan format part tetap (`image1.png` tetap PNG), jadi relasi dan `[Content_Types].xml`
+  tidak berubah. Transparansi dipertahankan; PNG yang seluruhnya opak disimpan sebagai RGB.
+  Profil warna (iCCP) di PNG tidak ikut dibawa oleh GD.
+- Butuh ekstensi PHP `gd`; tanpa itu, langkah gambar dilewati (font tetap dibuang).
 
 Namespace transitional dan strict OOXML sama-sama dikenali.
 
@@ -34,12 +56,16 @@ Namespace transitional dan strict OOXML sama-sama dikenali.
   dipertahankan.
 - Penggantian file bersifat atomik (file sementara di direktori yang sama lalu `rename()`),
   dan izin file dipertahankan.
-- Bila tidak ada font tertanam, file tidak diubah sama sekali.
+- Bila tidak ada font tertanam dan tidak ada PNG yang perlu diperkecil, file tidak diubah sama sekali.
 - Setiap hasil dicatat ke error log PHP, mis.:
-  `[DocxFontStripper] submissionFileId=12 fileId=34 journals/1/articles/5/….docx: stripped: 14,953,562 -> 489,826 bytes (-96.7%), 15 part(s) removed, 3 XML part(s) updated, 24 part(s) recompressed`
+  `[DocxFontStripper] submissionFileId=12 fileId=34 journals/1/articles/5/….docx: cleaned: 10,688,176 -> 146,163 bytes (-98.6%), 23 part(s) removed, 3 XML part(s) updated, 0 part(s) recompressed, 1 image(s) downscaled [word/media/image1.png 1493x1053 (2,121,543) -> 344x243 (98,878)]`
 - Kesalahan apa pun ditangkap; unggahan tidak pernah gagal karena plugin ini.
 
 ## Konsekuensi yang perlu diketahui
+
+Gambar PNG yang diperkecil kehilangan piksel di atas 500 dpi; pada ukuran tampil di
+dokumen tidak terlihat bedanya, tetapi bila gambar itu nanti diekstrak untuk dicetak jauh
+lebih besar, resolusi aslinya sudah tidak ada.
 
 Tanpa font tertanam, komputer pembaca yang **tidak** memiliki font tersebut akan memakai
 font pengganti. Teks tetap sama, tetapi tata letak bisa bergeser. Pada file contoh,
@@ -86,7 +112,12 @@ yang sedang diakses.
 Alternatif manual: salin isi arsip ke `plugins/generic/docxFontStripper/`, lalu jalankan
 `php lib/pkp/tools/installPluginVersion.php plugins/generic/docxFontStripper/version.xml`.
 
-Kebutuhan: ekstensi PHP `zip` dan `dom`. Bila tidak ada, plugin melewati file (dan mencatatnya ke log).
+Kebutuhan: ekstensi PHP `zip` dan `dom` (wajib; bila tidak ada, file dilewati dan dicatat ke
+log) serta `gd` (untuk memperkecil gambar).
+
+Memperbarui dari versi lama: unggah arsip versi baru lewat tombol **Upgrade** pada baris
+plugin di daftar Plugin Terpasang (bukan "Unggah Plugin Baru"); tombol ini hanya tampil untuk
+Administrator situs. Nama arsip tetap harus diawali `docxFontStripper`.
 
 ## Pengembangan dan tes
 

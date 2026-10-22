@@ -85,6 +85,76 @@ class DocxFixture {
 	}
 
 	/**
+	 * A picture paragraph (w:drawing/wp:inline/.../pic:pic) showing relationship $rId.
+	 *
+	 * @param string $rId
+	 * @param int $cx Displayed width in EMU (914400 per inch)
+	 * @param int $cy Displayed height in EMU
+	 * @param string $srcRect Attributes for a:srcRect (cropping), e.g. 'l="25000" r="25000"'
+	 * @return string
+	 */
+	public static function picture($rId, $cx, $cy, $srcRect = '') {
+		return '<w:p><w:r><w:drawing>'
+			. '<wp:inline xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing">'
+			. '<wp:extent cx="' . $cx . '" cy="' . $cy . '"/><wp:docPr id="1" name="Picture 1"/>'
+			. '<a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">'
+			. '<a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">'
+			. '<pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">'
+			. '<pic:nvPicPr><pic:cNvPr id="0" name="image1.png"/><pic:cNvPicPr/></pic:nvPicPr>'
+			. '<pic:blipFill><a:blip r:embed="' . $rId . '"/>' . ($srcRect === '' ? '<a:srcRect/>' : '<a:srcRect ' . $srcRect . '/>')
+			. '<a:stretch><a:fillRect/></a:stretch></pic:blipFill>'
+			. '<pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="' . $cx . '" cy="' . $cy . '"/></a:xfrm><a:prstGeom prst="rect"/></pic:spPr>'
+			. '</pic:pic></a:graphicData></a:graphic></wp:inline>'
+			. '</w:drawing></w:r></w:p>';
+	}
+
+	/**
+	 * Add $paragraphs at the start of the document body.
+	 *
+	 * @param array $parts
+	 * @param string $paragraphs
+	 * @return array
+	 */
+	public static function withBodyContent(array $parts, $paragraphs) {
+		$parts['word/document.xml'] = str_replace('<w:body>', '<w:body>' . $paragraphs, $parts['word/document.xml']);
+		return $parts;
+	}
+
+	/**
+	 * Noisy (hard to compress) PNG.
+	 *
+	 * @param int $width
+	 * @param int $height
+	 * @param bool $alpha Use translucent pixels
+	 * @return string
+	 */
+	public static function png($width, $height, $alpha = false) {
+		$image = imagecreatetruecolor($width, $height);
+		imagealphablending($image, false);
+		imagesavealpha($image, $alpha);
+		mt_srand(42);
+		for ($y = 0; $y < $height; $y++) {
+			for ($x = 0; $x < $width; $x++) {
+				$color = mt_rand(0, 0xFFFFFF);
+				if ($alpha) $color |= mt_rand(0, 100) << 24;
+				imagesetpixel($image, $x, $y, $color);
+			}
+		}
+		ob_start();
+		imagepng($image);
+		return ob_get_clean();
+	}
+
+	/**
+	 * PNG color type from the IHDR chunk (2 = RGB, 6 = RGBA).
+	 * @param string $png
+	 * @return int
+	 */
+	public static function pngColorType($png) {
+		return ord($png[25]);
+	}
+
+	/**
 	 * @param string $path
 	 * @param array $parts name => content
 	 * @param int $method ZipArchive::CM_DEFLATE or CM_STORE
