@@ -1,0 +1,18 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: \n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-10-22T00:00:00+00:00\n"
+"PO-Revision-Date: 2026-10-22T00:00:00+00:00\n"
+"Last-Translator: \n"
+"Language-Team: \n"
+"Language: \n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+msgid "plugins.generic.docxFontStripper.displayName"
+msgstr "Docx Font Stripper"
+
+msgid "plugins.generic.docxFontStripper.description"
+msgstr "Removes embedded fonts from uploaded Word (.docx) files (submission, review, revision, copyediting, production) and downscales PNG images stored at a much higher resolution than displayed (to 500 dpi), to keep files small. Document text, tables, comments and tracked changes are not changed; if the cleaned file cannot be verified, the original is kept. Results are written to the PHP error log."
