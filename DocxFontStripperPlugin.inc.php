@@ -17,10 +17,20 @@
  *    "Upload a revision" of an existing file (wizard and REST API).
  * Both fire after Services::get('file')->add() has stored the uploaded file,
  * so the stored file is cleaned in place.
+ *
+ * Upload guard (classes/UploadGuard.inc.php) rejects files a web server could
+ * execute (.php, .phtml, .phar, .cgi, .asp, .jsp, .shtml, .htaccess, ...) and
+ * Windows programs (.exe, .bat, ...) before they are kept:
+ *  - submissionfilesuploadform::validate  lib/pkp/classes/form/Form.inc.php:285
+ *    Upload wizard (FileUploadWizardHandler::uploadFile validates before the
+ *    file is stored).
+ *  - SubmissionFile::validate classes/services/PKPSubmissionFileService.inc.php:291
+ *    REST API (PKPSubmissionFileHandler deletes the stored file on errors).
  */
 
 import('lib.pkp.classes.plugins.GenericPlugin');
 require_once(__DIR__ . '/classes/DocxFontStripper.inc.php');
+require_once(__DIR__ . '/classes/UploadGuard.inc.php');
 
 class DocxFontStripperPlugin extends GenericPlugin {
 
@@ -36,6 +46,8 @@ class DocxFontStripperPlugin extends GenericPlugin {
 		if ($success && $this->getEnabled($mainContextId)) {
 			HookRegistry::register('SubmissionFile::add', [$this, 'handleSubmissionFileAdd']);
 			HookRegistry::register('SubmissionFile::edit', [$this, 'handleSubmissionFileEdit']);
+			HookRegistry::register('submissionfilesuploadform::validate', [$this, 'guardWizardUpload']);
+			HookRegistry::register('SubmissionFile::validate', [$this, 'guardApiUpload']);
 		}
 		return $success;
 	}
@@ -78,6 +90,104 @@ class DocxFontStripperPlugin extends GenericPlugin {
 			$this->_processFile((int) $params['fileId'], (int) $args[1]->getId());
 		}
 		return false;
+	}
+
+	/**
+	 * submissionfilesuploadform::validate callback (upload wizard).
+	 *
+	 * The wizard template cannot show form errors, and its JavaScript expects an
+	 * uploaded file whenever the response status is true. So a blocked file is
+	 * answered like a failed upload (status false), which the browser shows as
+	 * a message; nothing has been stored at this point.
+	 *
+	 * @param string $hookName
+	 * @param array $args [Form $form, mixed &$value]
+	 * @return bool
+	 */
+	public function guardWizardUpload($hookName, $args) {
+		$name = $_FILES['uploadedFile']['name'] ?? null;
+		if (!is_string($name)) return false;
+		$extension = (new UploadGuard())->blockedExtension($name);
+		if ($extension === null) return false;
+
+		$this->_logBlocked('wizard', $name, $extension);
+		$message = $this->_blockedMessage($extension);
+		$args[0]->addError('uploadedFile', $message);
+		$this->_sendJsonError($message);
+		return false;
+	}
+
+	/**
+	 * SubmissionFile::validate callback (REST API upload or revision).
+	 * The handler deletes the stored file when validation returns errors.
+	 *
+	 * @param string $hookName
+	 * @param array $args [array &$errors, string $action, array $props, array $allowedLocales, string $primaryLocale]
+	 * @return bool
+	 */
+	public function guardApiUpload($hookName, $args) {
+		$errors =& $args[0];
+		$props = $args[2];
+		if (empty($props['fileId'])) return false;
+
+		$names = [];
+		$upload = $_FILES['file']['name'] ?? null;
+		if (is_string($upload)) $names[] = $upload;
+		try {
+			$file = Services::get('file')->get((int) $props['fileId']);
+			if ($file) $names[] = $file->path;
+		} catch (Throwable $e) {
+			// Unknown file id: OJS reports that itself.
+		}
+
+		$guard = new UploadGuard();
+		foreach ($names as $name) {
+			$extension = $guard->blockedExtension($name);
+			if ($extension === null) continue;
+			$this->_logBlocked('api', $name, $extension);
+			if (!is_array($errors)) $errors = [];
+			$errors['fileId'] = [$this->_blockedMessage($extension)];
+			break;
+		}
+		return false;
+	}
+
+	/**
+	 * @param string $extension
+	 * @return string
+	 */
+	private function _blockedMessage($extension) {
+		return __('plugins.generic.docxFontStripper.uploadBlocked', ['extension' => $extension]);
+	}
+
+	/**
+	 * Answer the wizard upload request with a failed-upload JSON message and stop.
+	 * @param string $message
+	 */
+	protected function _sendJsonError($message) {
+		import('lib.pkp.classes.core.JSONMessage');
+		$json = new JSONMessage(false, $message);
+		if (!headers_sent()) header('Content-Type: application/json');
+		echo $json->getString();
+		exit;
+	}
+
+	/**
+	 * @param string $route wizard|api
+	 * @param string $name
+	 * @param string $extension
+	 */
+	private function _logBlocked($route, $name, $extension) {
+		$request = Application::get()->getRequest();
+		$user = $request ? $request->getUser() : null;
+		$this->_log(sprintf(
+			'blocked upload (%s): ext=%s name="%s" userId=%s ip=%s',
+			$route,
+			$extension,
+			preg_replace('/[^\x20-\x7E]/', '?', mb_substr($name, 0, 200)),
+			$user ? (int) $user->getId() : '-',
+			$request ? $request->getRemoteAddr() : '-'
+		));
 	}
 
 	/**

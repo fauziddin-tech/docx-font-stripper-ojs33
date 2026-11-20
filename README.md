@@ -4,6 +4,11 @@ Plugin generik OJS 3.3.0-x (diuji terhadap kode **3.3.0-22**; PHP 7.4–8.2) yan
 membuang **font tertanam** dari file Word `.docx` saat diunggah, dan **memperkecil gambar
 PNG** yang resolusinya jauh di atas ukuran tampilnya, supaya ukuran file kecil.
 
+Sejak 1.2.0.0 plugin ini juga menjadi **penjaga gawang unggahan**: file yang dapat
+dijalankan sebagai program oleh server web (`.php`, `.phtml`, `.phar`, `.cgi`, `.asp`,
+`.jsp`, `.shtml`, `.htaccess`, …) dan program Windows (`.exe`, `.bat`, …) ditolak saat
+diunggah, sebelum disimpan. Lihat [Penjaga unggahan](#penjaga-unggahan).
+
 Contoh nyata:
 
 | File | Sebelum | Sesudah | Keterangan |
@@ -60,6 +65,42 @@ Namespace transitional dan strict OOXML sama-sama dikenali.
 - Setiap hasil dicatat ke error log PHP, mis.:
   `[DocxFontStripper] submissionFileId=12 fileId=34 journals/1/articles/5/….docx: cleaned: 10,688,176 -> 146,163 bytes (-98.6%), 23 part(s) removed, 3 XML part(s) updated, 0 part(s) recompressed, 1 image(s) downscaled [word/media/image1.png 1493x1053 (2,121,543) -> 344x243 (98,878)]`
 - Kesalahan apa pun ditangkap; unggahan tidak pernah gagal karena plugin ini.
+
+## Penjaga unggahan
+
+OJS 3.3 menerima file berekstensi apa pun dan menyimpannya sebagai
+`<uniqid>.<ekstensi>` di `files_dir`. Hanya ekstensi yang mengandung `php` yang diganti
+OJS menjadi `.txt`; `.phtml`, `.phar`, `.pht`, `.shtml`, `.cgi`, dan sejenisnya tersimpan
+apa adanya. Bila `files_dir` pernah terjangkau dari web (salah konfigurasi, server
+bersama), file seperti itu bisa menjadi web shell.
+
+Ekstensi yang ditolak (`classes/UploadGuard.inc.php`, `UploadGuard::DEFAULT_BLOCKED`):
+
+| Kelompok | Ekstensi |
+|---|---|
+| Skrip server | `php` `phtml` `pht` `phar` `phps` `php3`–`php8` `inc` `cgi` `fcgi` `asp` `aspx` `ashx` `asmx` `jsp` `jspx` `shtml` `shtm` `stm` |
+| Konfigurasi server | `.htaccess` `.htpasswd` `.user.ini` |
+| Program Windows | `exe` `dll` `com` `scr` `msi` `bat` `cmd` `vbs` `vbe` `wsf` `ps1` `hta` `lnk` |
+
+Sengaja **tidak** ditolak: kode riset (`.py`, `.r`, `.sh`, `.ipynb`), gambar `.svg`,
+galley HTML (`.html`, `.htm`), arsip data (`.zip`, `.csv`).
+
+Yang diperiksa hanya ekstensi terakhir (huruf besar/kecil sama saja, titik/spasi di akhir
+diabaikan), karena hanya itu yang sampai ke disk: `artikel.php.docx` tersimpan sebagai
+`.docx` dan diterima; `zip.phtml` ditolak.
+
+| Jalur unggah | Hook | Akibat |
+|---|---|---|
+| Wizard unggah (submission, review, revisi, copyediting, produksi/galley, diskusi) | `submissionfilesuploadform::validate` (`lib/pkp/classes/form/Form.inc.php:285`) | Divalidasi sebelum file disimpan. Browser menampilkan pesan, tombol Lanjut tetap nonaktif |
+| REST API `POST/PUT /submissions/{id}/files` | `SubmissionFile::validate` (`lib/pkp/classes/services/PKPSubmissionFileService.inc.php:291`) | Respons 400 dengan pesan di `fileId`; OJS menghapus file yang sempat disimpan |
+
+Pesan untuk pengguna: *"File berekstensi .phtml tidak diterima karena dapat dijalankan
+sebagai program di server. Unggah naskah dalam format DOCX, ODT, atau PDF."* Setiap
+penolakan dicatat ke error log PHP, mis.:
+`[DocxFontStripper] blocked upload (wizard): ext=phtml name="zip.phtml" userId=812 ip=203.0.113.5`
+
+Tidak dijaga plugin ini (bukan file submission, hanya bisa diunggah manajer/editor): file
+pustaka penerbit, gambar sampul, file galley terbitan (issue galley), logo/favicon jurnal.
 
 ## Konsekuensi yang perlu diketahui
 
@@ -121,8 +162,8 @@ Administrator situs. Nama arsip tetap harus diawali `docxFontStripper`.
 
 ## Pengembangan dan tes
 
-Logika pembersih ada di `classes/DocxFontStripper.inc.php` sebagai kelas murni (tanpa
-OJS). Tes membuat `.docx` sintetis dengan dan tanpa font tertanam:
+Logika pembersih ada di `classes/DocxFontStripper.inc.php` dan penjaga unggahan di
+`classes/UploadGuard.inc.php`, keduanya kelas murni (tanpa OJS). Tes membuat `.docx` sintetis dengan dan tanpa font tertanam:
 
 ```sh
 composer install
