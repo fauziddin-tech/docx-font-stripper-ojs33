@@ -9,6 +9,9 @@ dijalankan sebagai program oleh server web (`.php`, `.phtml`, `.phar`, `.cgi`, `
 `.jsp`, `.shtml`, `.htaccess`, …) dan program Windows (`.exe`, `.bat`, …) ditolak saat
 diunggah, sebelum disimpan. Lihat [Penjaga unggahan](#penjaga-unggahan).
 
+Sejak 1.3.0.0 plugin ini **menampilkan ukuran file** pada tautan galley di halaman pembaca
+(mis. `PDF (1,2 MB)`), apa pun tema yang dipakai. Lihat [Ukuran file galley](#ukuran-file-galley).
+
 Contoh nyata:
 
 | File | Sebelum | Sesudah | Keterangan |
@@ -102,6 +105,28 @@ penolakan dicatat ke error log PHP, mis.:
 Tidak dijaga plugin ini (bukan file submission, hanya bisa diunggah manajer/editor): file
 pustaka penerbit, gambar sampul, file galley terbitan (issue galley), logo/favicon jurnal.
 
+## Ukuran file galley
+
+Sebelumnya ukuran file galley ditampilkan oleh tema Daffa Manuscript lewat
+`galley_link.tpl`-nya sendiri, sehingga hilang ketika jurnal memakai tema lain. Plugin ini
+menambahkannya tanpa bergantung pada tema:
+
+- Hook `TemplateManager::display` (`lib/pkp/classes/template/PKPTemplateManager.inc.php:1227`)
+  mendaftarkan output filter Smarty, yang dijalankan atas HTML akhir seluruh halaman pembaca
+  (template `frontend/…` dan template plugin seperti penampil PDF.js). Halaman backend tidak disentuh.
+- Setiap `<a href>` yang menunjuk ke galley artikel atau galley terbitan **di jurnal ini**
+  (`article/view|download/{artikel}/{galley}`, juga `…/version/{publikasi}/{galley}`, dan
+  `issue/view|download/{terbitan}/{galley}`; URL gaya `index.php?journal=…&path[]=…` juga dikenali)
+  diberi `<span class="dfs_file_size">(1,2 MB)</span>` di dalam tautan.
+- Ukuran dibaca dari file tersimpan (`files_dir`/Flysystem) untuk galley artikel, dan dari
+  `issue_files.file_size` untuk galley terbitan. Hanya publikasi/terbitan yang sudah terbit;
+  galley URL jarak jauh dilewati.
+- Tautan yang **sudah** menampilkan ukuran (di dalam tautan atau tepat sesudahnya, mis. bila tema
+  Daffa Manuscript masih aktif) tidak diberi ukuran kedua. Tautan berkelas `dfs_no_size` juga dilewati.
+- Format: `820 B`, `17 KB`, `1,2 MB`, `15 MB`, `1,1 GB` (1 KB = 1024 B); pemisah desimal
+  mengikuti bahasa pembaca (koma untuk Bahasa Indonesia, titik untuk English).
+- Tampilan dapat diatur lewat CSS tema, mis. `.dfs_file_size { opacity: .8; font-size: .9em; }`.
+
 ## Konsekuensi yang perlu diketahui
 
 Gambar PNG yang diperkecil kehilangan piksel di atas 500 dpi; pada ukuran tampil di
@@ -162,8 +187,9 @@ Administrator situs. Nama arsip tetap harus diawali `docxFontStripper`.
 
 ## Pengembangan dan tes
 
-Logika pembersih ada di `classes/DocxFontStripper.inc.php` dan penjaga unggahan di
-`classes/UploadGuard.inc.php`, keduanya kelas murni (tanpa OJS). Tes membuat `.docx` sintetis dengan dan tanpa font tertanam:
+Logika pembersih ada di `classes/DocxFontStripper.inc.php`, penjaga unggahan di
+`classes/UploadGuard.inc.php`, dan penanda ukuran galley di `classes/GalleyFileSize.inc.php`;
+ketiganya kelas murni (tanpa OJS). Tes membuat `.docx` sintetis dengan dan tanpa font tertanam:
 
 ```sh
 composer install

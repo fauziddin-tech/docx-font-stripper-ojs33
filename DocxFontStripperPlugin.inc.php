@@ -26,16 +26,25 @@
  *    file is stored).
  *  - SubmissionFile::validate classes/services/PKPSubmissionFileService.inc.php:291
  *    REST API (PKPSubmissionFileHandler deletes the stored file on errors).
+ *
+ * Galley file size (classes/GalleyFileSize.inc.php) adds the size to every
+ * article and issue galley link on reader pages, whatever the theme:
+ *  - TemplateManager::display lib/pkp/classes/template/PKPTemplateManager.inc.php:1227
+ *    registers a Smarty output filter, which Smarty runs on the whole page.
  */
 
 import('lib.pkp.classes.plugins.GenericPlugin');
 require_once(__DIR__ . '/classes/DocxFontStripper.inc.php');
 require_once(__DIR__ . '/classes/UploadGuard.inc.php');
+require_once(__DIR__ . '/classes/GalleyFileSize.inc.php');
 
 class DocxFontStripperPlugin extends GenericPlugin {
 
 	/** @var int[] File ids already handled in this request */
 	private $_handledFileIds = [];
+
+	/** @var bool Whether the galley size output filter is registered */
+	private $_sizeFilterRegistered = false;
 
 	/**
 	 * @copydoc Plugin::register()
@@ -48,6 +57,7 @@ class DocxFontStripperPlugin extends GenericPlugin {
 			HookRegistry::register('SubmissionFile::edit', [$this, 'handleSubmissionFileEdit']);
 			HookRegistry::register('submissionfilesuploadform::validate', [$this, 'guardWizardUpload']);
 			HookRegistry::register('SubmissionFile::validate', [$this, 'guardApiUpload']);
+			HookRegistry::register('TemplateManager::display', [$this, 'registerGalleySizeFilter']);
 		}
 		return $success;
 	}
@@ -150,6 +160,161 @@ class DocxFontStripperPlugin extends GenericPlugin {
 			break;
 		}
 		return false;
+	}
+
+	/**
+	 * TemplateManager::display callback: add file sizes to galley links on
+	 * reader pages. Independent of the theme, because the filter works on the
+	 * page's final HTML instead of a theme's galley_link.tpl.
+	 *
+	 * @param string $hookName
+	 * @param array $args [TemplateManager $templateMgr, string &$template, string &$output]
+	 * @return bool
+	 */
+	public function registerGalleySizeFilter($hookName, $args) {
+		if ($this->_sizeFilterRegistered) return false;
+		$templateMgr = $args[0];
+		$template = $args[1];
+		if (!is_string($template) || !$this->_isReaderTemplate($template)) return false;
+
+		$request = Application::get()->getRequest();
+		$context = $request ? $request->getContext() : null;
+		if (!$context) return false;
+
+		$this->_sizeFilterRegistered = true;
+		$templateMgr->registerFilter('output', function ($html) use ($request, $context) {
+			try {
+				return $this->_galleyFileSize($request, $context)->annotate($html);
+			} catch (Throwable $e) {
+				$this->_log('galley file size: ' . $e->getMessage());
+				return $html;
+			}
+		});
+		return false;
+	}
+
+	/**
+	 * Reader-facing templates: OJS frontend pages and plugin templates shown to
+	 * readers (theme pages, PDF.js galley viewer, static pages, ...). Backend
+	 * pages are left alone.
+	 *
+	 * @param string $template
+	 * @return bool
+	 */
+	private function _isReaderTemplate($template) {
+		if (strpos($template, 'frontend/') === 0) return true;
+		if (strpos($template, ':') === false) return false;
+		$request = Application::get()->getRequest();
+		$page = $request ? (string) $request->getRequestedPage() : '';
+		$backendPages = ['dashboard', 'submissions', 'workflow', 'authorDashboard', 'reviewer', 'management', 'manageIssues', 'stats', 'admin', 'tools', 'settings', 'user'];
+		return !in_array($page, $backendPages, true);
+	}
+
+	/**
+	 * @param PKPRequest $request
+	 * @param Context $context
+	 * @return GalleyFileSize
+	 */
+	private function _galleyFileSize($request, $context) {
+		$prefixes = [];
+		foreach (['article', 'issue'] as $page) {
+			foreach (['view', 'download'] as $op) {
+				$prefixes[$page][] = $request->url($context->getPath(), $page, $op);
+			}
+		}
+		return new GalleyFileSize($prefixes, function ($page, $args) use ($context) {
+			try {
+				return $page === 'article'
+					? $this->_articleGalleySize($context, $args)
+					: $this->_issueGalleySize($context, $args);
+			} catch (Throwable $e) {
+				return null;
+			}
+		}, $this->_decimalSeparator());
+	}
+
+	/**
+	 * Size of an article galley's file, for a link with these path arguments.
+	 * Only galleys of published publications in this journal.
+	 *
+	 * @param Context $context
+	 * @param string[] $args {submission}/{galley}[/{fileId}] or {submission}/version/{publicationId}/{galley}[/{fileId}]
+	 * @return int|null
+	 */
+	private function _articleGalleySize($context, array $args) {
+		$submissionPath = array_shift($args);
+		$submissionService = Services::get('submission');
+		$submission = $submissionService->getByUrlPath($submissionPath, $context->getId());
+		if (!$submission && ctype_digit($submissionPath)) $submission = $submissionService->get((int) $submissionPath);
+		if (!$submission || (int) $submission->getData('contextId') !== (int) $context->getId()) return null;
+
+		if (($args[0] ?? null) === 'version') {
+			array_shift($args);
+			$publicationId = (int) array_shift($args);
+			$publication = null;
+			foreach ((array) $submission->getData('publications') as $candidate) {
+				if ((int) $candidate->getId() === $publicationId) $publication = $candidate;
+			}
+		} else {
+			$publication = $submission->getCurrentPublication();
+		}
+		if (!$publication || (int) $publication->getData('status') !== STATUS_PUBLISHED) return null;
+
+		$galleyPath = array_shift($args);
+		$fileId = array_shift($args);
+		foreach ((array) $publication->getData('galleys') as $galley) {
+			if ((string) $galley->getBestGalleyId() !== $galleyPath) continue;
+			if ($galley->getData('urlRemote')) return null;
+			$submissionFileId = (int) $galley->getData('submissionFileId');
+			if (!$submissionFileId || ($fileId !== null && (int) $fileId !== $submissionFileId)) return null;
+			$submissionFile = Services::get('submissionFile')->get($submissionFileId);
+			return $submissionFile ? $this->_storedFileSize((int) $submissionFile->getData('fileId')) : null;
+		}
+		return null;
+	}
+
+	/**
+	 * Size of an issue galley's file. Only published issues of this journal.
+	 *
+	 * @param Context $context
+	 * @param string[] $args {issue}/{galley}[/{fileId}]
+	 * @return int|null
+	 */
+	private function _issueGalleySize($context, array $args) {
+		$issue = DAORegistry::getDAO('IssueDAO')->getByBestId($args[0], $context->getId(), true);
+		if (!$issue || !$issue->getPublished()) return null;
+		$galley = DAORegistry::getDAO('IssueGalleyDAO')->getByBestId($args[1], $issue->getId());
+		if (!$galley) return null;
+		if (isset($args[2]) && (int) $args[2] !== (int) $galley->getFileId()) return null;
+		$size = (int) $galley->getFileSize();
+		return $size > 0 ? $size : null;
+	}
+
+	/**
+	 * @param int $fileId Row in the `files` table
+	 * @return int|null
+	 */
+	private function _storedFileSize($fileId) {
+		if (!$fileId) return null;
+		$fileService = Services::get('file');
+		$file = $fileService->get($fileId);
+		if (!$file || !$fileService->fs->has($file->path)) return null;
+		$size = (int) $fileService->fs->getSize($file->path);
+		return $size > 0 ? $size : null;
+	}
+
+	/**
+	 * Decimal separator for the reader's locale ("1,2 MB" in Indonesian, "1.2 MB" in English).
+	 * @return string
+	 */
+	private function _decimalSeparator() {
+		$locale = AppLocale::getLocale();
+		if (class_exists('NumberFormatter')) {
+			$formatter = new NumberFormatter($locale, NumberFormatter::DECIMAL);
+			$separator = $formatter->getSymbol(NumberFormatter::DECIMAL_SEPARATOR_SYMBOL);
+			if (is_string($separator) && $separator !== '') return $separator;
+		}
+		return in_array(substr($locale, 0, 2), ['id', 'de', 'fr', 'es', 'it', 'pt', 'nl', 'ru', 'tr', 'pl', 'cs', 'uk', 'ro', 'hu', 'sv', 'da', 'nb', 'fi'], true) ? ',' : '.';
 	}
 
 	/**
