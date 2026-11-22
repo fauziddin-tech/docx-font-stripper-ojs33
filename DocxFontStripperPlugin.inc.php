@@ -182,6 +182,9 @@ class DocxFontStripperPlugin extends GenericPlugin {
 		if (!$context) return false;
 
 		$this->_sizeFilterRegistered = true;
+		// Smarty keys output filters by name and names every closure "closure",
+		// so an unnamed closure would replace, or be replaced by, another
+		// plugin's (e.g. Publication Facts Label). Register under our own name.
 		$templateMgr->registerFilter('output', function ($html) use ($request, $context) {
 			try {
 				return $this->_galleyFileSize($request, $context)->annotate($html);
@@ -189,7 +192,7 @@ class DocxFontStripperPlugin extends GenericPlugin {
 				$this->_log('galley file size: ' . $e->getMessage());
 				return $html;
 			}
-		});
+		}, 'docxFontStripperGalleySize');
 		return false;
 	}
 
