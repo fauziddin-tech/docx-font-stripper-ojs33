@@ -3,8 +3,13 @@
 #
 #   scripts/build-package.sh [OUT_DIR] [ojs33|ojs35]
 #
-#   ojs33 (default): docxFontStripper-<version>.tar.gz        OJS 3.3
-#   ojs35:           docxFontStripper-ojs3.5-<version>.tar.gz OJS 3.5
+#   ojs33 (default): docxFontStripper-<version>.tar.gz          OJS 3.3 (1.x)
+#   ojs35:           docxFontStripper-ojs3.5-<version35>.tar.gz OJS 3.5 (2.x)
+#
+# Version numbers: the OJS 3.3 build is 1.a.b.c, the OJS 3.5 build is
+# 2.a.b.c with the same a.b.c (same features). The OJS 3.5 build is 2.x
+# because an earlier OJS 3.5 port was released as 2.0.0.0, and OJS only
+# upgrades a plugin to a higher version.
 #
 # Both archives contain a single top-level directory "docxFontStripper/",
 # which is what OJS's PluginHelper expects. The OJS 3.5 build takes the
@@ -20,8 +25,13 @@ TARGET="${2:-ojs33}"
 version_of() { sed -n 's:.*<release>\(.*\)</release>.*:\1:p' "$1"; }
 VERSION="$(version_of "$ROOT/version.xml")"
 [ -n "$VERSION" ] || { echo "No <release> in version.xml" >&2; exit 1; }
-if [ "$(version_of "$ROOT/ojs35/version.xml")" != "$VERSION" ]; then
-	echo "ojs35/version.xml release differs from version.xml ($VERSION)" >&2
+VERSION35="$(version_of "$ROOT/ojs35/version.xml")"
+case "$VERSION" in
+	1.*) ;;
+	*) echo "version.xml release $VERSION must start with 1. (OJS 3.3 build)" >&2; exit 1 ;;
+esac
+if [ "$VERSION35" != "2.${VERSION#1.}" ]; then
+	echo "ojs35/version.xml release $VERSION35 must be 2.${VERSION#1.} (version.xml is $VERSION)" >&2
 	exit 1
 fi
 
@@ -39,7 +49,7 @@ case "$TARGET" in
 		cp "$ROOT/ojs35/version.xml" "$ROOT/ojs35/DocxFontStripperPlugin.php" "$ROOT/README.md" "$STAGE/$NAME/"
 		cp -R "$ROOT/classes" "$ROOT/js" "$ROOT/ojs35/locale" "$STAGE/$NAME/"
 		cp "$ROOT"/ojs35/classes/*.php "$STAGE/$NAME/classes/"
-		ARCHIVE="$OUT_DIR/$NAME-ojs3.5-$VERSION.tar.gz"
+		ARCHIVE="$OUT_DIR/$NAME-ojs3.5-$VERSION35.tar.gz"
 		;;
 	*)
 		echo "Unknown target $TARGET (ojs33 or ojs35)" >&2
