@@ -29,6 +29,9 @@ jobs:
       - name: Lint plugin files
         run: for f in *.php classes/*.php tests/*.php; do php -l "$f"; done
 
+      - name: JavaScript syntax
+        run: for f in js/*.js; do node --check "$f"; done
+
       - name: Install dependencies
         run: composer install --no-interaction --no-progress
 
@@ -51,6 +54,7 @@ jobs:
         run: |
           tar -tzf "${{ steps.build.outputs.archive }}"
           tar -tzf "${{ steps.build.outputs.archive }}" | grep -qx 'docxFontStripper/version.xml'
+          tar -tzf "${{ steps.build.outputs.archive }}" | grep -qx 'docxFontStripper/js/fileSizes.js'
 
       - uses: actions/upload-artifact@v4
         with:

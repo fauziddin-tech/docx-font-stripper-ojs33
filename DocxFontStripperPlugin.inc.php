@@ -31,14 +31,25 @@
  * article and issue galley link on reader pages, whatever the theme:
  *  - TemplateManager::display lib/pkp/classes/template/PKPTemplateManager.inc.php:1227
  *    registers a Smarty output filter, which Smarty runs on the whole page.
+ *
+ * Back end file sizes (classes/SubmissionFileSizes.inc.php, js/fileSizes.js)
+ * show the size of each file in the workflow, author dashboard and reviewer
+ * file lists (moved here from the Manuscript-Daffa theme):
+ *  - TemplateManager::display adds js/fileSizes.js to back end pages, and
+ *    answers ?docxFontStripperFileSizes=1&submissionId=N on the journal's
+ *    "About this Publishing System" page with JSON instead of the page.
  */
 
 import('lib.pkp.classes.plugins.GenericPlugin');
 require_once(__DIR__ . '/classes/DocxFontStripper.inc.php');
 require_once(__DIR__ . '/classes/UploadGuard.inc.php');
 require_once(__DIR__ . '/classes/GalleyFileSize.inc.php');
+require_once(__DIR__ . '/classes/SubmissionFileSizes.inc.php');
 
 class DocxFontStripperPlugin extends GenericPlugin {
+
+	/** Request parameter of the back end file size lookup */
+	const FILE_SIZE_PARAM = 'docxFontStripperFileSizes';
 
 	/** @var int[] File ids already handled in this request */
 	private $_handledFileIds = [];
@@ -57,6 +68,9 @@ class DocxFontStripperPlugin extends GenericPlugin {
 			HookRegistry::register('SubmissionFile::edit', [$this, 'handleSubmissionFileEdit']);
 			HookRegistry::register('submissionfilesuploadform::validate', [$this, 'guardWizardUpload']);
 			HookRegistry::register('SubmissionFile::validate', [$this, 'guardApiUpload']);
+			// Must run before registerGalleySizeFilter: answering the size
+			// lookup ends the hook chain.
+			HookRegistry::register('TemplateManager::display', [$this, 'handleFileSizes']);
 			HookRegistry::register('TemplateManager::display', [$this, 'registerGalleySizeFilter']);
 		}
 		return $success;
@@ -163,6 +177,85 @@ class DocxFontStripperPlugin extends GenericPlugin {
 	}
 
 	/**
+	 * TemplateManager::display callback for the back end file sizes.
+	 *  - With ?docxFontStripperFileSizes=1: answer with the JSON sizes of
+	 *    ?submissionId instead of the page (stops the hook chain).
+	 *  - Otherwise, for logged-in users in a journal: add js/fileSizes.js to
+	 *    back end pages (the script is not loaded on reader pages).
+	 *
+	 * @param string $hookName
+	 * @param array $args [TemplateManager $templateMgr, string &$template, string &$output]
+	 * @return bool
+	 */
+	public function handleFileSizes($hookName, $args) {
+		$request = Application::get()->getRequest();
+		if (!$request) return false;
+
+		if ($request->getUserVar(self::FILE_SIZE_PARAM) !== null) {
+			$output =& $args[2];
+			$output = $this->_fileSizeResponse($request);
+			return true;
+		}
+
+		try {
+			$this->_addFileSizeScript($args[0], $request);
+		} catch (Throwable $e) {
+			$this->_log('file size script: ' . $e->getMessage());
+		}
+		return false;
+	}
+
+	/**
+	 * @param TemplateManager $templateMgr
+	 * @param PKPRequest $request
+	 */
+	private function _addFileSizeScript($templateMgr, $request) {
+		$context = $request->getContext();
+		if (!$request->getUser() || !$context) return;
+
+		$config = [
+			'url' => $request->getDispatcher()->url($request, ROUTE_PAGE, $context->getPath(), 'about', 'aboutThisPublishingSystem', null, [self::FILE_SIZE_PARAM => 1]),
+			'largeBytes' => SubmissionFileSizes::LARGE_FILE_BYTES,
+			'largeLabel' => __('plugins.generic.docxFontStripper.largeFile'),
+			'decimalSeparator' => $this->_decimalSeparator(),
+		];
+		$templateMgr->addJavaScript(
+			'docxFontStripperFileSizesConfig',
+			'window.docxFontStripperFileSizes = ' . json_encode($config, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP) . ';',
+			['inline' => true, 'contexts' => 'backend']
+		);
+		$script = __DIR__ . '/js/fileSizes.js';
+		$templateMgr->addJavaScript(
+			'docxFontStripperFileSizes',
+			$request->getBaseUrl() . '/' . $this->getPluginPath() . '/js/fileSizes.js?v=' . (int) @filemtime($script),
+			['contexts' => 'backend']
+		);
+	}
+
+	/**
+	 * JSON answer of the back end file size lookup.
+	 * 403 when the user may not see the submission.
+	 *
+	 * @param PKPRequest $request
+	 * @return string
+	 */
+	private function _fileSizeResponse($request) {
+		$sizes = null;
+		try {
+			$sizes = SubmissionFileSizes::forSubmission((int) $request->getUserVar('submissionId'));
+		} catch (Throwable $e) {
+			$this->_log('file sizes: ' . $e->getMessage());
+		}
+		if (!headers_sent()) {
+			header('Content-Type: application/json; charset=utf-8');
+			header('Cache-Control: no-store, private');
+			header('X-Robots-Tag: noindex');
+			if ($sizes === null) http_response_code(403);
+		}
+		return json_encode(['sizes' => (object) ($sizes ?? [])]);
+	}
+
+	/**
 	 * TemplateManager::display callback: add file sizes to galley links on
 	 * reader pages. Independent of the theme, because the filter works on the
 	 * page's final HTML instead of a theme's galley_link.tpl.
@@ -182,6 +275,9 @@ class DocxFontStripperPlugin extends GenericPlugin {
 		if (!$context) return false;
 
 		$this->_sizeFilterRegistered = true;
+		// Smarty keys output filters by name and names every closure "closure",
+		// so an unnamed closure would replace, or be replaced by, another
+		// plugin's (e.g. Publication Facts Label). Register under our own name.
 		$templateMgr->registerFilter('output', function ($html) use ($request, $context) {
 			try {
 				return $this->_galleyFileSize($request, $context)->annotate($html);
@@ -189,7 +285,7 @@ class DocxFontStripperPlugin extends GenericPlugin {
 				$this->_log('galley file size: ' . $e->getMessage());
 				return $html;
 			}
-		});
+		}, 'docxFontStripperGalleySize');
 		return false;
 	}
 
