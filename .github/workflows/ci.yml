@@ -90,8 +90,8 @@ jobs:
         run: |
           version="$(sed -n 's:.*<release>\(.*\)</release>.*:\1:p' version.xml)"
           version35="$(sed -n 's:.*<release>\(.*\)</release>.*:\1:p' ojs35/version.xml)"
-          if [ "$version35" != "$version" ]; then
-            echo "ojs35/version.xml release $version35 does not match version.xml $version" >&2
+          if [ "$version35" != "2.${version#1.}" ]; then
+            echo "ojs35/version.xml release $version35 must be 2.${version#1.} (version.xml is $version)" >&2
             exit 1
           fi
           if [ "${GITHUB_REF_NAME#v}" != "$version" ]; then

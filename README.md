@@ -1,6 +1,6 @@
 # Docx Font Stripper (OJS 3.3 dan 3.5)
 
-Plugin generik OJS 3.3.0-x (diuji terhadap kode **3.3.0-22**; PHP 7.4–8.2) dan, sejak 1.5.0.0,
+Plugin generik OJS 3.3.0-x (diuji terhadap kode **3.3.0-22**; PHP 7.4–8.2) dan, sejak 1.5.0.0 / 2.5.0.0,
 OJS 3.5 (kode **3.5.0-6**; PHP 8.2+; lihat [Versi untuk OJS 3.5](#versi-untuk-ojs-35)) yang
 membuang **font tertanam** dari file Word `.docx` saat diunggah, dan **memperkecil gambar
 PNG** yang resolusinya jauh di atas ukuran tampilnya, supaya ukuran file kecil.
@@ -26,12 +26,18 @@ Contoh nyata:
 
 ## Versi untuk OJS 3.5
 
-Setiap rilis memuat dua berkas di halaman **Releases**, dengan fitur dan nomor versi yang sama:
+Setiap rilis memuat dua berkas di halaman **Releases**, dengan fitur yang sama:
 
-| OJS | Berkas |
-|---|---|
-| 3.3 (PHP 7.4–8.2) | `docxFontStripper-<versi>.tar.gz` |
-| 3.5 (PHP 8.2+) | `docxFontStripper-ojs3.5-<versi>.tar.gz` |
+| OJS | Seri versi | Berkas (contoh 1.5.0.1) |
+|---|---|---|
+| 3.3 (PHP 7.4–8.2) | 1.x | `docxFontStripper-1.5.0.1.tar.gz` |
+| 3.5 (PHP 8.2+) | 2.x | `docxFontStripper-ojs3.5-2.5.0.1.tar.gz` |
+
+Versi OJS 3.5 = versi OJS 3.3 dengan angka pertama 2 (1.5.0.1 ↔ 2.5.0.1). Alasannya, port
+OJS 3.5 sebelumnya (hanya pembersih font dan gambar) pernah dirilis sebagai **2.0.0.0**, dan OJS
+hanya mau meng-*upgrade* plugin ke versi yang lebih tinggi. Jurnal yang sudah memasang 2.0.0.0
+cukup memakai tombol **Upgrade** dengan berkas 2.5.0.1 atau lebih baru. Tag rilis mengikuti versi
+OJS 3.3 (mis. `v1.5.0.1`).
 
 Keduanya memasang folder `plugins/generic/docxFontStripper`. Pasang berkas yang sesuai
 dengan versi OJS; berkas OJS 3.3 tidak bisa dipakai di OJS 3.5, dan sebaliknya.
@@ -236,7 +242,7 @@ yang sedang diakses.
 ## Instalasi
 
 1. Unduh `docxFontStripper-<versi>.tar.gz` (OJS 3.3) atau
-   `docxFontStripper-ojs3.5-<versi>.tar.gz` (OJS 3.5) dari halaman Releases (atau jalankan
+   `docxFontStripper-ojs3.5-<versi 2.x>.tar.gz` (OJS 3.5) dari halaman Releases (atau jalankan
    `scripts/build-package.sh dist ojs33` / `scripts/build-package.sh dist ojs35`, hasilnya di `dist/`).
 2. OJS: *Pengaturan → Website → Plugin → Unggah Plugin Baru* → pilih file `.tar.gz`.
    Nama arsip harus diawali `docxFontStripper` (sudah demikian), karena OJS mencocokkan
@@ -272,10 +278,11 @@ memeriksa sintaks build OJS 3.5 di PHP 8.2 ke atas, dan membangun kedua paket.
 
 Membuat rilis:
 
-1. Naikkan `<release>` di `version.xml` **dan** `ojs35/version.xml` (harus sama, mis. `1.2.0.0`)
-   dan tulis `release-notes/1.2.0.0.md`.
+1. Naikkan `<release>` di `version.xml` (mis. `1.6.0.0`) **dan** `ojs35/version.xml` (harus
+   `2.` + sisanya, mis. `2.6.0.0`; dicek oleh `scripts/build-package.sh` dan CI)
+   dan tulis `release-notes/1.6.0.0.md`.
 2. Setelah masuk ke `main`, buat tag `v` + versi tersebut dan push:
-   `git tag v1.2.0.0 && git push origin v1.2.0.0`.
+   `git tag v1.6.0.0 && git push origin v1.6.0.0`.
 3. Bila tes lolos, workflow membuat Release untuk tag itu dengan
-   `docxFontStripper-1.2.0.0.tar.gz` dan `docxFontStripper-ojs3.5-1.2.0.0.tar.gz` terlampir
+   `docxFontStripper-1.6.0.0.tar.gz` dan `docxFontStripper-ojs3.5-2.6.0.0.tar.gz` terlampir
    (tag yang tidak cocok dengan `version.xml` ditolak). Release yang dibuat manual lewat GitHub juga mendapat lampiran yang sama.

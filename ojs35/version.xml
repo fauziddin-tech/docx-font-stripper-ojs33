@@ -6,13 +6,15 @@
   *
   * Distributed under the GNU GPL v3.
   *
-  * Plugin version information (OJS 3.5 build). Keep <release> and <date>
-  * equal to the OJS 3.3 version.xml in the repository root.
+  * Plugin version information (OJS 3.5 build). <release> is 2.a.b.c for
+  * version 1.a.b.c of the OJS 3.3 build (version.xml in the repository
+  * root): an earlier OJS 3.5 port was released as 2.0.0.0, and OJS only
+  * upgrades a plugin to a higher version. Keep <date> equal to it.
   -->
 <version>
 	<application>docxFontStripper</application>
 	<type>plugins.generic</type>
-	<release>1.5.0.0</release>
+	<release>2.5.0.1</release>
 	<date>2026-11-22</date>
 	<lazy-load>1</lazy-load>
 	<class>DocxFontStripperPlugin</class>
