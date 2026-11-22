@@ -15,7 +15,7 @@ trap 'rm -rf "$STAGE"' EXIT
 
 mkdir -p "$STAGE/$NAME" "$OUT_DIR"
 cp "$ROOT/index.php" "$ROOT/version.xml" "$ROOT/DocxFontStripperPlugin.inc.php" "$ROOT/README.md" "$STAGE/$NAME/"
-cp -R "$ROOT/classes" "$ROOT/locale" "$STAGE/$NAME/"
+cp -R "$ROOT/classes" "$ROOT/js" "$ROOT/locale" "$STAGE/$NAME/"
 
 for f in "$STAGE/$NAME"/*.php "$STAGE/$NAME"/classes/*.php; do
 	php -l "$f" >/dev/null

@@ -12,6 +12,10 @@ diunggah, sebelum disimpan. Lihat [Penjaga unggahan](#penjaga-unggahan).
 Sejak 1.3.0.0 plugin ini **menampilkan ukuran file** pada tautan galley di halaman pembaca
 (mis. `PDF (1,2 MB)`), apa pun tema yang dipakai. Lihat [Ukuran file galley](#ukuran-file-galley).
 
+Sejak 1.4.0.0 plugin ini juga **menampilkan ukuran setiap file di daftar file backend**
+(workflow, dasbor penulis, reviewer), dengan file 5 MB ke atas ditandai merah. Fitur ini
+dipindahkan dari tema Manuscript-Daffa. Lihat [Ukuran file di backend](#ukuran-file-di-backend).
+
 Contoh nyata:
 
 | File | Sebelum | Sesudah | Keterangan |
@@ -105,6 +109,37 @@ penolakan dicatat ke error log PHP, mis.:
 Tidak dijaga plugin ini (bukan file submission, hanya bisa diunggah manajer/editor): file
 pustaka penerbit, gambar sampul, file galley terbitan (issue galley), logo/favicon jurnal.
 
+## Ukuran file di backend
+
+Di daftar file *Workflow* (Submission, Review, Copyediting, Production), *Author Dashboard*,
+dan halaman reviewer (*Download & Review*), ukuran setiap file tampil kecil di bawah jenisnya
+(di halaman reviewer di bawah tanggal), mis. "Article Text" lalu "8,0 MB". File **5 MB ke atas**
+ditandai merah tebal (sering karena font tertanam di Word). Fitur ini sebelumnya ada di tema
+Manuscript-Daffa; sekarang tampil apa pun temanya.
+
+- Skrip `js/fileSizes.js` hanya dimuat di halaman backend untuk pengguna yang login, lewat hook
+  `TemplateManager::display`. Daftar yang dimuat lewat AJAX ikut ditangani (pemantau perubahan
+  halaman, jeda 150 ms).
+- Ukuran diminta sekali per naskah per pemuatan halaman: halaman *About this Publishing System*
+  jurnal dengan `?docxFontStripperFileSizes=1&submissionId=N` dijawab plugin dengan JSON
+  (`{"sizes": {"<submissionFileId>": <byte>}}`), bukan halaman. File yang diunggah setelah
+  halaman dibuka baru tampil ukurannya setelah halaman dimuat ulang.
+- Ukuran dibaca dari penyimpanan dengan satu kueri (`submission_files` + `files`), tanpa
+  mengunduh file dan tanpa tercatat sebagai unduhan (`classes/SubmissionFileSizes.inc.php`).
+- Hanya naskah di jurnal yang sedang dibuka, dan hanya untuk pengguna yang terlibat:
+
+  | Pengguna | Ukuran yang didapat |
+  |---|---|
+  | Manajer jurnal, admin situs, editor/asisten yang ditugaskan | semua file naskah |
+  | Penulis yang ditugaskan | file yang terlihat di dasbor penulis (submission, revisi, copyedit, proof, lampiran review yang dibagikan ke penulis) dan unggahannya sendiri |
+  | Reviewer | file penugasan review-nya sendiri dan lampirannya |
+  | Lainnya | tidak ada (HTTP 403) |
+
+- Ambang 5 MB: `SubmissionFileSizes::LARGE_FILE_BYTES`. Kelas CSS: `.dfs-file-size` dan
+  `.dfs-file-size-large`.
+- Bila tema Manuscript-Daffa versi lama (yang masih punya fitur ini) aktif, baris yang sudah
+  diberi ukuran oleh tema dilewati, jadi ukuran tidak tampil dua kali.
+
 ## Ukuran file galley
 
 Sebelumnya ukuran file galley ditampilkan oleh tema Daffa Manuscript lewat
@@ -189,7 +224,8 @@ Administrator situs. Nama arsip tetap harus diawali `docxFontStripper`.
 
 Logika pembersih ada di `classes/DocxFontStripper.inc.php`, penjaga unggahan di
 `classes/UploadGuard.inc.php`, dan penanda ukuran galley di `classes/GalleyFileSize.inc.php`;
-ketiganya kelas murni (tanpa OJS). Tes membuat `.docx` sintetis dengan dan tanpa font tertanam:
+ketiganya kelas murni (tanpa OJS). Ukuran file backend ada di `classes/SubmissionFileSizes.inc.php`
+(aturan akses diuji tanpa OJS) dan `js/fileSizes.js`. Tes membuat `.docx` sintetis dengan dan tanpa font tertanam:
 
 ```sh
 composer install
