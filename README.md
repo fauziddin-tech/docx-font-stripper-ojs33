@@ -285,4 +285,9 @@ Membuat rilis:
    `git tag v1.6.0.0 && git push origin v1.6.0.0`.
 3. Bila tes lolos, workflow membuat Release untuk tag itu dengan
    `docxFontStripper-1.6.0.0.tar.gz` dan `docxFontStripper-ojs3.5-2.6.0.0.tar.gz` terlampir
-   (tag yang tidak cocok dengan `version.xml` ditolak). Release yang dibuat manual lewat GitHub juga mendapat lampiran yang sama.
+   (tag yang tidak cocok dengan `version.xml` ditolak).
+
+Cara lain (tanpa push tag): buat Release di GitHub (*Releases → Draft a new release*, tag baru
+`v` + versi, target `main`). Workflow untuk event `release` melampirkan kedua arsip. Run untuk
+tag baru yang ikut terpicu melihat Release sudah ada dan tidak mengunggah apa-apa, jadi
+arsip tidak diunggah dua kali.

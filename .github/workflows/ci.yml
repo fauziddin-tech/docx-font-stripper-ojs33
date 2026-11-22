@@ -77,16 +77,17 @@ jobs:
           name: docxFontStripper
           path: dist/*.tar.gz
 
-      - name: Attach archive to release
-        if: github.event_name == 'release'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh release upload "${{ github.event.release.tag_name }}" dist/*.tar.gz --clobber --repo "${{ github.repository }}"
-
-      # Pushing a tag such as v1.1.0.0 creates the release (notes from
-      # release-notes/<version>.md) with the archive attached.
+      # A release made on GitHub (Releases > Draft a new release, with a new
+      # tag) starts two runs of this workflow at the same time: one for the
+      # release (event "release") and one for the new tag (event "push").
+      # Only the release run attaches the archives; the tag run attaches them
+      # only when it creates the release itself, i.e. for a tag pushed with
+      # git. Releases created with GITHUB_TOKEN start no "release" run, so
+      # the archives are never uploaded twice.
       - name: Check tag matches version.xml
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: github.event_name == 'release' || (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v'))
+        env:
+          TAG: ${{ github.event_name == 'release' && github.event.release.tag_name || github.ref_name }}
         run: |
           version="$(sed -n 's:.*<release>\(.*\)</release>.*:\1:p' version.xml)"
           version35="$(sed -n 's:.*<release>\(.*\)</release>.*:\1:p' ojs35/version.xml)"
@@ -94,22 +95,30 @@ jobs:
             echo "ojs35/version.xml release $version35 must be 2.${version#1.} (version.xml is $version)" >&2
             exit 1
           fi
-          if [ "${GITHUB_REF_NAME#v}" != "$version" ]; then
-            echo "Tag $GITHUB_REF_NAME does not match version.xml release $version" >&2
+          if [ "${TAG#v}" != "$version" ]; then
+            echo "Tag $TAG does not match version.xml release $version" >&2
             exit 1
           fi
 
-      - name: Create release for tag
-        if: startsWith(github.ref, 'refs/tags/v')
+      - name: Attach archives to release
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ github.event.release.tag_name }}" dist/*.tar.gz --clobber --repo "${{ github.repository }}"
+
+      # Pushing a tag such as v1.6.0.0 with git creates the release (notes
+      # from release-notes/<version>.md) with the archives attached.
+      - name: Create release for pushed tag
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           tag="$GITHUB_REF_NAME"
           notes="release-notes/${tag#v}.md"
           if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release upload "$tag" dist/*.tar.gz --clobber --repo "$GITHUB_REPOSITORY"
-          else
-            args=(--title "Docx Font Stripper ${tag#v}" --verify-tag)
-            if [ -f "$notes" ]; then args+=(--notes-file "$notes"); else args+=(--generate-notes); fi
-            gh release create "$tag" dist/*.tar.gz "${args[@]}" --repo "$GITHUB_REPOSITORY"
+            echo "Release $tag already exists (made on GitHub); its own run attaches the archives."
+            exit 0
           fi
+          args=(--title "Docx Font Stripper ${tag#v}" --verify-tag)
+          if [ -f "$notes" ]; then args+=(--notes-file "$notes"); else args+=(--generate-notes); fi
+          gh release create "$tag" dist/*.tar.gz "${args[@]}" --repo "$GITHUB_REPOSITORY"
