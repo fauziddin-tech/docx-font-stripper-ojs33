@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE version SYSTEM "../../../lib/pkp/dtd/pluginVersion.dtd">
+
+<!--
+  * plugins/generic/docxFontStripper/version.xml
+  *
+  * Distributed under the GNU GPL v3.
+  *
+  * Plugin version information (OJS 3.5 build). Keep <release> and <date>
+  * equal to the OJS 3.3 version.xml in the repository root.
+  -->
+<version>
+	<application>docxFontStripper</application>
+	<type>plugins.generic</type>
+	<release>1.5.0.0</release>
+	<date>2026-11-22</date>
+	<lazy-load>1</lazy-load>
+	<class>DocxFontStripperPlugin</class>
+</version>

@@ -1,0 +1,24 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: \n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-10-22T00:00:00+00:00\n"
+"PO-Revision-Date: 2026-10-22T00:00:00+00:00\n"
+"Last-Translator: \n"
+"Language-Team: \n"
+"Language: en\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+msgid "plugins.generic.docxFontStripper.displayName"
+msgstr "Docx Font Stripper"
+
+msgid "plugins.generic.docxFontStripper.description"
+msgstr "Removes embedded fonts from uploaded Word (.docx) files (submission, review, revision, copyediting, production) and downscales PNG images stored at a much higher resolution than displayed (to 500 dpi), to keep files small. Document text, tables, comments and tracked changes are not changed; if the cleaned file cannot be verified, the original is kept. Results are written to the PHP error log. Also rejects uploads that a web server could run as a program (.php, .phtml, .phar, .cgi, .asp, .jsp, .shtml, .htaccess) and Windows programs (.exe, .bat, ...). Shows the file size on galley links (PDF, HTML, ...) on article and issue pages, whatever the theme, and the size of each file in the back end file lists (workflow, author dashboard, reviewer), with files of 5 MB or more in red."
+
+msgid "plugins.generic.docxFontStripper.uploadBlocked"
+msgstr "Files with the .{$extension} extension are not accepted because they can run as a program on the server. Please upload the manuscript as DOCX, ODT or PDF."
+
+msgid "plugins.generic.docxFontStripper.largeFile"
+msgstr "Large file (5 MB or more): often a Word file with embedded fonts"

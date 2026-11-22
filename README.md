@@ -1,6 +1,7 @@
-# Docx Font Stripper (OJS 3.3)
+# Docx Font Stripper (OJS 3.3 dan 3.5)
 
-Plugin generik OJS 3.3.0-x (diuji terhadap kode **3.3.0-22**; PHP 7.4–8.2) yang
+Plugin generik OJS 3.3.0-x (diuji terhadap kode **3.3.0-22**; PHP 7.4–8.2) dan, sejak 1.5.0.0,
+OJS 3.5 (kode **3.5.0-6**; PHP 8.2+; lihat [Versi untuk OJS 3.5](#versi-untuk-ojs-35)) yang
 membuang **font tertanam** dari file Word `.docx` saat diunggah, dan **memperkecil gambar
 PNG** yang resolusinya jauh di atas ukuran tampilnya, supaya ukuran file kecil.
 
@@ -22,6 +23,37 @@ Contoh nyata:
 |---|---|---|---|
 | Artikel A | 14,95 MB | 0,49 MB | 14 font tertanam, semua entri ZIP tanpa kompresi; sisanya gambar JPEG (tidak diubah) |
 | Artikel B | 10,69 MB | 0,15 MB | 22 file font (8,5 MB); logo PNG 1493×1053 px (2,1 MB) yang tampil 1,74×1,23 cm diperkecil ke 344×243 px (99 KB) |
+
+## Versi untuk OJS 3.5
+
+Setiap rilis memuat dua berkas di halaman **Releases**, dengan fitur dan nomor versi yang sama:
+
+| OJS | Berkas |
+|---|---|
+| 3.3 (PHP 7.4–8.2) | `docxFontStripper-<versi>.tar.gz` |
+| 3.5 (PHP 8.2+) | `docxFontStripper-ojs3.5-<versi>.tar.gz` |
+
+Keduanya memasang folder `plugins/generic/docxFontStripper`. Pasang berkas yang sesuai
+dengan versi OJS; berkas OJS 3.3 tidak bisa dipakai di OJS 3.5, dan sebaliknya.
+
+Kode OJS 3.5 ada di folder `ojs35/`: kelas plugin `DocxFontStripperPlugin.php` (namespace
+`APP\plugins\generic\docxFontStripper`), `classes/FileSizeLookup.php`, `version.xml`, dan
+`locale/en`, `locale/id`. Pembersih font, penjaga unggahan, penanda ukuran galley, aturan akses
+ukuran file, dan `js/fileSizes.js` dipakai bersama oleh kedua versi.
+`scripts/build-package.sh dist ojs35` menggabungkannya menjadi arsip OJS 3.5.
+
+Hook yang dipakai di OJS 3.5 (pkp-lib tag `3_5_0-6`) bernama sama dengan di OJS 3.3:
+
+| Hook | Lokasi |
+|---|---|
+| `SubmissionFile::add` | `lib/pkp/classes/submissionFile/Repository.php:275` |
+| `SubmissionFile::edit` | `lib/pkp/classes/submissionFile/Repository.php:358`; diproses bila `fileId` baru berbeda dari yang lama |
+| `submissionfilesuploadform::validate` | `lib/pkp/classes/form/Form.php:311` (wizard unggah) |
+| `SubmissionFile::validate` | `lib/pkp/classes/submissionFile/Repository.php:252`. `POST` menyimpan file dulu lalu menghapusnya bila ada galat; `PUT` memvalidasi sebelum menyimpan, jadi nama di `$_FILES['file']` juga diperiksa |
+| `TemplateManager::display` | `lib/pkp/classes/template/PKPTemplateManager.php:1488` |
+
+Perbedaan teknis: file di `files_dir` diproses langsung di tempatnya; bila penyimpanan bukan
+`files_dir` lokal, file disalin ke temp, diproses, lalu ditulis balik lewat Flysystem 3.
 
 ## Yang diubah dalam .docx
 
@@ -203,8 +235,9 @@ yang sedang diakses.
 
 ## Instalasi
 
-1. Unduh `docxFontStripper-<versi>.tar.gz` dari halaman Releases (atau jalankan
-   `scripts/build-package.sh`, hasilnya di `dist/`).
+1. Unduh `docxFontStripper-<versi>.tar.gz` (OJS 3.3) atau
+   `docxFontStripper-ojs3.5-<versi>.tar.gz` (OJS 3.5) dari halaman Releases (atau jalankan
+   `scripts/build-package.sh dist ojs33` / `scripts/build-package.sh dist ojs35`, hasilnya di `dist/`).
 2. OJS: *Pengaturan → Website → Plugin → Unggah Plugin Baru* → pilih file `.tar.gz`.
    Nama arsip harus diawali `docxFontStripper` (sudah demikian), karena OJS mencocokkan
    nama arsip dengan direktori di dalamnya (`lib/pkp/classes/plugins/PluginHelper.inc.php:42`).
@@ -234,14 +267,15 @@ vendor/bin/phpunit
 DOCX_SAMPLE=/path/ke/artikel.docx vendor/bin/phpunit --filter testRealSample
 ```
 
-GitHub Actions (`.github/workflows/ci.yml`) menjalankan tes di PHP 7.4, 8.1, dan 8.2 dan
-membangun paket.
+GitHub Actions (`.github/workflows/ci.yml`) menjalankan tes di PHP 7.4, 8.1, 8.2, 8.3, dan 8.4,
+memeriksa sintaks build OJS 3.5 di PHP 8.2 ke atas, dan membangun kedua paket.
 
 Membuat rilis:
 
-1. Naikkan `<release>` di `version.xml` (mis. `1.2.0.0`) dan tulis `release-notes/1.2.0.0.md`.
+1. Naikkan `<release>` di `version.xml` **dan** `ojs35/version.xml` (harus sama, mis. `1.2.0.0`)
+   dan tulis `release-notes/1.2.0.0.md`.
 2. Setelah masuk ke `main`, buat tag `v` + versi tersebut dan push:
    `git tag v1.2.0.0 && git push origin v1.2.0.0`.
 3. Bila tes lolos, workflow membuat Release untuk tag itu dengan
-   `docxFontStripper-1.2.0.0.tar.gz` terlampir (tag yang tidak cocok dengan `version.xml`
-   ditolak). Release yang dibuat manual lewat GitHub juga mendapat lampiran yang sama.
+   `docxFontStripper-1.2.0.0.tar.gz` dan `docxFontStripper-ojs3.5-1.2.0.0.tar.gz` terlampir
+   (tag yang tidak cocok dengan `version.xml` ditolak). Release yang dibuat manual lewat GitHub juga mendapat lampiran yang sama.

@@ -15,7 +15,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        php: ['7.4', '8.1', '8.2']
+        php: ['7.4', '8.1', '8.2', '8.3', '8.4']
     steps:
       - uses: actions/checkout@v4
 
@@ -28,6 +28,11 @@ jobs:
 
       - name: Lint plugin files
         run: for f in *.php classes/*.php tests/*.php; do php -l "$f"; done
+
+      # The OJS 3.5 build needs PHP 8.2 or newer (OJS 3.5's own minimum)
+      - name: Lint OJS 3.5 build
+        if: matrix.php != '7.4' && matrix.php != '8.1'
+        run: for f in ojs35/*.php ojs35/classes/*.php; do php -l "$f"; done
 
       - name: JavaScript syntax
         run: for f in js/*.js; do node --check "$f"; done
@@ -46,15 +51,26 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build plugin archive
+      - name: Build plugin archives
         id: build
-        run: echo "archive=$(scripts/build-package.sh dist)" >> "$GITHUB_OUTPUT"
+        run: |
+          echo "archive33=$(scripts/build-package.sh dist ojs33)" >> "$GITHUB_OUTPUT"
+          echo "archive35=$(scripts/build-package.sh dist ojs35)" >> "$GITHUB_OUTPUT"
 
       - name: Check archive layout
         run: |
-          tar -tzf "${{ steps.build.outputs.archive }}"
-          tar -tzf "${{ steps.build.outputs.archive }}" | grep -qx 'docxFontStripper/version.xml'
-          tar -tzf "${{ steps.build.outputs.archive }}" | grep -qx 'docxFontStripper/js/fileSizes.js'
+          a33="${{ steps.build.outputs.archive33 }}"
+          a35="${{ steps.build.outputs.archive35 }}"
+          tar -tzf "$a33"
+          tar -tzf "$a35"
+          for f in version.xml js/fileSizes.js classes/DocxFontStripper.inc.php; do
+            tar -tzf "$a33" | grep -qx "docxFontStripper/$f"
+            tar -tzf "$a35" | grep -qx "docxFontStripper/$f"
+          done
+          tar -tzf "$a33" | grep -qx 'docxFontStripper/DocxFontStripperPlugin.inc.php'
+          tar -tzf "$a35" | grep -qx 'docxFontStripper/DocxFontStripperPlugin.php'
+          tar -tzf "$a35" | grep -qx 'docxFontStripper/classes/FileSizeLookup.php'
+          tar -tzf "$a35" | grep -qx 'docxFontStripper/locale/id/locale.po'
 
       - uses: actions/upload-artifact@v4
         with:
@@ -73,6 +89,11 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
           version="$(sed -n 's:.*<release>\(.*\)</release>.*:\1:p' version.xml)"
+          version35="$(sed -n 's:.*<release>\(.*\)</release>.*:\1:p' ojs35/version.xml)"
+          if [ "$version35" != "$version" ]; then
+            echo "ojs35/version.xml release $version35 does not match version.xml $version" >&2
+            exit 1
+          fi
           if [ "${GITHUB_REF_NAME#v}" != "$version" ]; then
             echo "Tag $GITHUB_REF_NAME does not match version.xml release $version" >&2
             exit 1
